@@ -1,0 +1,6 @@
+{
+  "name": "AGILA Hub Android Architecture",
+  "description": "Master Architecture, Security Specifications, and Implementation Plan for the AGILA Hub Android mobile application.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
