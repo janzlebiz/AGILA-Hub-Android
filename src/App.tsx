@@ -43,7 +43,7 @@ export default function App() {
 
   const tabs: TabItem[] = [
     { id: 'overview', label: 'Executive Overview', icon: Layers },
-    { id: 'remediations', label: 'Remediations (3.8)', icon: Shield },
+    { id: 'remediations', label: 'Remediations (3.9)', icon: Shield },
     { id: 'matrix', label: 'Verification Matrix', icon: FileCheck },
     { id: 'migrations', label: 'SQL Migrations (001-009)', icon: Database },
     { id: 'preflight', label: 'Preflight Script', icon: Terminal },
@@ -54,41 +54,11 @@ export default function App() {
   const remediations = [
     {
       id: 'REM-01',
-      title: 'Schema-Aligned Preflight Index Assertions',
-      category: 'Database Integrity',
-      location: 'scripts/preflight_schema_check.sql & Section 8.1',
-      problem: 'Previous preflight script checked uq_members_email_lower and uq_contributions_reference instead of actual schema names idx_members_email_lower and uq_reference_payment on (payment_channel, reference_number).',
-      solution: 'Aligned assertions with exact schema names and validated expressions: idx_members_email_lower with LOWER(email), uq_reference_payment on (payment_channel, reference_number), and idx_sections_embedding with HNSW vector_cosine_ops.',
-      status: 'VERIFIED BY SPEC & DDL',
-      tests: [
-        { type: 'Positive', name: 'Baseline Schema Pass', desc: 'Preflight script executes cleanly against complete schema baseline, verifying all 10 tables, 3 extensions, columns, triggers, functions, indexes, and active RLS.' },
-        { type: 'Negative', name: 'Missing Index Expression', desc: 'Recreating email index without LOWER(email) causes script to fail closed with descriptive exception.' },
-        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Disabling RLS on any public table causes script to fail closed with fatal validation exception.' }
-      ]
-    },
-    {
-      id: 'REM-02',
-      title: 'Restore Safety: Independent Endpoint Verification & Exhaustive Invariants',
-      category: 'Disaster Recovery',
-      location: 'scripts/restore_database.sh & Section 7.2',
-      problem: 'Previous restore script checked constructed substrings rather than verifying against trusted production endpoints. Post-restore query checked RLS on only 4 tables and missed expense approved_by/reversed_by foreign keys.',
-      solution: 'Enforces independent production verification (direct TARGET_DB_HOST vs PROD_DB_HOST check, canonical resolved IP comparison, strict TARGET_ENV whitelist). Post-restore query asserts referential integrity across ALL member references in expenses (recorded, approved, reversed) and contributions, and asserts active RLS across ALL public tables.',
-      status: 'VERIFIED BY SPECIFICATION',
-      tests: [
-        { type: 'Positive', name: 'Valid Staging Execution', desc: 'Executes restore on verified backup targeting staging; automated PL/pgSQL assertions verify all foreign keys, financial invariants, and RLS.' },
-        { type: 'Negative', name: 'Direct Endpoint Match', desc: 'Setting TARGET_DB_HOST to match PROD_DB_HOST halts immediately before connection with FATAL.' },
-        { type: 'Negative', name: 'IP Resolution Match', desc: 'Target host resolving to same IP as production cluster halts immediately before connection with FATAL.' },
-        { type: 'Negative', name: 'Orphan approved_by / reversed_by FK', desc: 'Backup with orphan approved_by or reversed_by raises fatal post-restore exception and fails script.' },
-        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Any public table with rowsecurity = FALSE raises fatal post-restore exception and fails script.' }
-      ]
-    },
-    {
-      id: 'REM-03',
-      title: 'Audit Privacy & Expense Payload Source Fix',
+      title: 'Audit Privacy & Expense Payload Integrity',
       category: 'Security & PII',
       location: 'supabase/migrations/20261013000008_audit_logs_and_triggers.sql',
       problem: 'In expenses audit logging, v_safe_new erroneously read category from v_raw_old->\'category\' instead of v_raw_new->\'category\', causing category to be NULL on INSERTs and stale on UPDATEs.',
-      solution: 'Corrected v_safe_new mapping to v_raw_new->\'category\'. Enforced strict per-table allowlists for all 8 audited tables. Unmapped fallback logs strictly jsonb_build_object(\'id\', v_record_id). Added actor_type context.',
+      solution: 'Corrected v_safe_new mapping to v_raw_new->\'category\'. Enforced strict per-table allowlists for all 8 audited tables. Unmapped fallback logs strictly jsonb_build_object(\'id\', v_record_id). Added actor_type context (VARCHAR(50)).',
       status: 'VERIFIED BY SPEC & DDL',
       tests: [
         { type: 'Positive', name: 'Expense Category Regression Test', desc: 'Insert expense (category=\'venue_rental\') -> audit captures new_data->>\'category\'=\'venue_rental\' (non-null) and old_data IS NULL. Update to \'equipment_rental\' captures old and new.' },
@@ -96,16 +66,57 @@ export default function App() {
       ]
     },
     {
-      id: 'REM-04',
-      title: 'Expense & Contribution Attribution Preservation',
+      id: 'REM-02',
+      title: 'Type-Aligned & Uniqueness-Verified Preflight Assertions',
+      category: 'Database Integrity',
+      location: 'scripts/preflight_schema_check.sql & Section 8.1',
+      problem: 'Previous preflight script checked audit_logs.actor_type as text (mismatching VARCHAR(50)), and checked index names without verifying index uniqueness (indisunique) on idx_members_email_lower or column embedding on idx_sections_embedding.',
+      solution: 'Aligned actor_type check to character varying(50). Added indisunique = true validation to idx_members_email_lower and uq_reference_payment. Verified idx_sections_embedding indexes embedding with vector_cosine_ops and HNSW.',
+      status: 'VERIFIED BY SPEC & DDL',
+      tests: [
+        { type: 'Positive', name: 'Baseline Schema Pass', desc: 'Preflight script executes cleanly against complete schema baseline, verifying all 10 tables, 3 extensions, columns, triggers, functions, indexes, and active RLS.' },
+        { type: 'Negative', name: 'Non-Unique Email Index', desc: 'Recreating email index without UNIQUE (indisunique = false) causes script to fail closed with fatal validation exception.' },
+        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Disabling RLS on any public table causes script to fail closed with fatal validation exception.' }
+      ]
+    },
+    {
+      id: 'REM-03',
+      title: 'Expense Attribution: Preserved Approval on Reversal',
       category: 'Financial Governance',
       location: 'supabase/migrations/20261013000006_financial_records.sql',
-      problem: 'Reversing or voiding financial records previously wiped approval/verification metadata, destroying audit trails.',
-      solution: 'Preserves approved_by/at on expense reversal while tracking reversed_by/at and mandatory reversal_reason. Preserves verified_by/at on contribution void/adjustment while tracking closed_by/at.',
+      problem: 'Reversing an approved expense previously overwrote approved_by and approved_at, destroying the historical audit record of who originally approved the disbursement.',
+      solution: 'Preserves approved_by and approved_at intact on reversal while tracking reversed_by and reversed_at with mandatory descriptive reversal_reason (>= 5 chars).',
       status: 'VERIFIED BY SPEC & DDL',
       tests: [
         { type: 'Positive', name: 'Approval & Reversal Trail', desc: 'Officer B approves expense; Officer C reverses with reason -> record retains approved_by=Officer_B, reversed_by=Officer_C.' },
         { type: 'Negative', name: 'Metadata Tampering Block', desc: 'Client updates approved_by while leaving status = \'verified\' -> fails with validation exception.' }
+      ]
+    },
+    {
+      id: 'REM-04',
+      title: 'Contribution Attribution: Preserved Verification on Voiding/Adjustment',
+      category: 'Financial Governance',
+      location: 'supabase/migrations/20261013000006_financial_records.sql',
+      problem: 'Voiding or adjusting a contribution previously wiped verification metadata, destroying the audit record of funds confirmation.',
+      solution: 'Preserves verified_by and verified_at intact on voiding/adjustment while tracking closed_by and closed_at with mandatory void_reason.',
+      status: 'VERIFIED BY SPEC & DDL',
+      tests: [
+        { type: 'Positive', name: 'Verification & Voiding Trail', desc: 'Officer B verifies contribution; Officer C voids with reason -> record retains verified_by=Officer_B, closed_by=Officer_C.' },
+        { type: 'Negative', name: 'Terminal State Modification', desc: 'Client attempts to transition from voided to verified -> fails with terminal state exception.' }
+      ]
+    },
+    {
+      id: 'REM-05',
+      title: 'Restore Safety: Fail-Closed DNS Resolution & Exhaustive Invariants',
+      category: 'Disaster Recovery',
+      location: 'scripts/restore_database.sh & Section 7.2',
+      problem: 'Previous restore script checked constructed substrings, failed open if DNS lookup returned empty, and checked only 4 tables for RLS.',
+      solution: 'Enforces set -euo pipefail, independent PROD_DB_HOST checks, fail-closed DNS set comparison via comm -12, atomic single-transaction restore, and exhaustive PL/pgSQL assertions across ALL member references and ALL public tables.',
+      status: 'VERIFIED BY SPECIFICATION',
+      tests: [
+        { type: 'Positive', name: 'Valid Staging Execution', desc: 'Executes restore on verified backup targeting staging; automated PL/pgSQL assertions verify all foreign keys, financial invariants, and RLS.' },
+        { type: 'Negative', name: 'DNS Resolution Failure / IP Overlap', desc: 'Host resolution failure or IP overlap between target and production halts immediately before connection with FATAL.' },
+        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Any public table with rowsecurity = FALSE raises fatal post-restore exception and fails script.' }
       ]
     }
   ];
@@ -151,7 +162,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight text-white">AGILA Hub Android</span>
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Revision 3.8
+                  Revision 3.9
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Production Architecture & Testable Baseline Specification</p>
@@ -205,13 +216,13 @@ export default function App() {
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 <div className="space-y-2 max-w-3xl">
                   <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-300 text-xs font-semibold border border-sky-500/20">
-                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.8 Production Specification
+                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.9 Production Specification
                   </div>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                     TFOE-PE Bantayog Elite Eagles Club Android Platform
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions and independent restore endpoint verification are completely reconciled.
+                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions, audit payload sources, and independent restore endpoint verification are completely reconciled.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[240px]">
@@ -231,18 +242,18 @@ export default function App() {
               </div>
             </div>
 
-            {/* 4 Pillars of Revision 3.8 */}
+            {/* 5 Pillars of Revision 3.9 */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Aligned Preflight Indexes</div>
                 <p className="text-xs text-slate-300">
-                  Preflight script now checks <code className="text-sky-300">idx_members_email_lower</code> on <code className="text-emerald-300">LOWER(email)</code> and <code className="text-sky-300">uq_reference_payment</code> on <code className="text-emerald-300">(payment_channel, reference_number)</code>.
+                  Preflight script now checks <code className="text-sky-300">idx_members_email_lower</code> with <code className="text-emerald-300">indisunique = true</code> and <code className="text-sky-300">uq_reference_payment</code> on <code className="text-emerald-300">(payment_channel, reference_number)</code>.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Independent Restore Isolation</div>
                 <p className="text-xs text-slate-300">
-                  Restoration checks <code className="text-emerald-300">TARGET_DB_HOST</code> directly against <code className="text-amber-300">PROD_DB_HOST</code>, verifies canonical DNS/IP, and enforces strict environment whitelisting.
+                  Restoration checks <code className="text-emerald-300">TARGET_DB_HOST</code> directly against <code className="text-amber-300">PROD_DB_HOST</code>, verifies complete canonical DNS/IP sets with <code className="text-purple-300">comm -12</code>, and enforces strict environment whitelisting.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
@@ -264,7 +275,7 @@ export default function App() {
         {/* Tab 2: Remediations */}
         {activeTab === 'remediations' && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.8)</h2>
+            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.9)</h2>
             <div className="space-y-4">
               {remediations.map((rem) => (
                 <div key={rem.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
@@ -736,7 +747,7 @@ EOF`}
 
       {/* Footer */}
       <footer className="border-t border-slate-800 bg-slate-950 py-4 px-4 text-center text-xs text-slate-500">
-        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.8 Baseline
+        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.9 Baseline
       </footer>
     </div>
   );

@@ -1,5 +1,5 @@
 # AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan
-**Document Version:** Revision 3.8 (Production Architecture & Testable Baseline Specification)  
+**Document Version:** Revision 3.9 (Production Architecture & Testable Baseline Specification)  
 **Status:** Completed Phase 00 Planning Specification (Awaiting Stakeholder Approval)  
 **Target Platform:** Android (React Native + Expo SDK 52+ + TypeScript)  
 **Backend:** Supabase (PostgreSQL 16, GoTrue Auth, Storage, Edge Functions, pgvector)  
@@ -1712,7 +1712,7 @@ USING (
     *   **Supabase Pro / Team Tier (with PITR Add-On):** Continuous physical Write-Ahead Log (WAL) archiving with a **7-day retention window**. RPO is $\le 1\,\text{minute}$. **Meets the $\le 1\,\text{hour}$ RPO requirement.**
     *   **Supabase Free / Dev Tier:** Provides only automated daily logical backups. RPO is $\le 24\,\text{hours}$. **Fails the $\le 1\,\text{hour}$ RPO requirement.**
 *   **Restoration Safety & Invariant Rules:**
-    1. **Independent Production Endpoint Verification:** Rather than checking constructed host substrings, the script enforces multi-layer endpoint comparison against trusted production configurations. It directly compares `TARGET_DB_HOST` against authoritative `PROD_DB_HOST` and verifies that their canonical resolved IP addresses do not match. It also enforces a strict environment whitelist (`TARGET_ENV` must explicitly be `staging` or `development`).
+    1. **Fail-Closed Production Endpoint Isolation:** Rather than relying on substring matching or single-IP lookups that fail open, the script enforces multi-layer endpoint comparison against trusted environment configurations. It directly compares `TARGET_DB_HOST` against authoritative `PROD_DB_HOST`, enforces a strict environment whitelist (`TARGET_ENV` must explicitly be `staging` or `development`), and executes **fail-closed DNS resolution** comparing complete normalized address sets (`comm -12`). If either host cannot be resolved, or if any overlapping IP address is detected, the script terminates immediately with a fatal error.
     2. **Fail-Fast Shell Handling:** Bash script enforces `set -euo pipefail` to terminate immediately on command failure, uninitialized variables, or pipeline errors.
     3. **Atomic Single-Transaction Safety:** Restore executes via `psql --single-transaction -v ON_ERROR_STOP=1`. If any error or constraint violation occurs during execution, PostgreSQL rolls back all changes atomically.
     4. **Topological Order:** Data is inserted in strict topological dependency order (`members` -> `invitations`/`eagles_id_cards` -> `attendance_events` -> `attendance_records` -> `contributions` -> `expenses` -> `announcements` -> `audit_logs`). No unsafe session replication or trigger-disabling hacks are permitted.
@@ -1760,11 +1760,28 @@ if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
     exit 1
 fi
 
-# Hard block 4: Canonical resolved IP verification (detects CNAME/alias pointing to production)
-TARGET_IP=$(getent hosts "$TARGET_HOST" 2>/dev/null | awk '{print $1}' || true)
-PROD_IP=$(getent hosts "$PROD_DB_HOST" 2>/dev/null | awk '{print $1}' || true)
-if [ -n "$TARGET_IP" ] && [ -n "$PROD_IP" ] && [ "$TARGET_IP" = "$PROD_IP" ]; then
-    echo "FATAL: TARGET_HOST ($TARGET_HOST -> $TARGET_IP) resolves to same IP as PROD_DB_HOST ($PROD_DB_HOST -> $PROD_IP). Aborted." >&2
+# Hard block 4: Fail-closed complete address set verification (detects CNAME/proxy/IP aliases)
+# Resolve all IPv4 and IPv6 addresses for both endpoints, sort, and normalize
+TARGET_IPS=$( (getent ahosts "$TARGET_HOST" 2>/dev/null || getent hosts "$TARGET_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
+PROD_IPS=$( (getent ahosts "$PROD_DB_HOST" 2>/dev/null || getent hosts "$PROD_DB_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
+
+# Fail closed: Both endpoints must resolve successfully to non-empty address sets
+if [ -z "$TARGET_IPS" ]; then
+    echo "FATAL: DNS resolution failed or returned empty address set for TARGET_HOST '$TARGET_HOST'. Fail-closed abort." >&2
+    exit 1
+fi
+
+if [ -z "$PROD_IPS" ]; then
+    echo "FATAL: DNS resolution failed or returned empty address set for PROD_DB_HOST '$PROD_DB_HOST'. Fail-closed abort." >&2
+    exit 1
+fi
+
+# Compare complete normalized address sets for any overlapping IP address
+OVERLAPPING_IPS=$(comm -12 <(echo "$TARGET_IPS") <(echo "$PROD_IPS"))
+if [ -n "$OVERLAPPING_IPS" ]; then
+    echo "FATAL: Endpoint alias detected! TARGET_HOST ('$TARGET_HOST') shares resolved IP address(es) with PROD_DB_HOST ('$PROD_DB_HOST'):" >&2
+    echo "$OVERLAPPING_IPS" >&2
+    echo "Restore aborted by endpoint isolation policy." >&2
     exit 1
 fi
 
@@ -2001,9 +2018,13 @@ BEGIN
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'audit_logs' AND column_name = 'actor_type' AND data_type = 'text'
+        WHERE table_schema = 'public' 
+          AND table_name = 'audit_logs' 
+          AND column_name = 'actor_type' 
+          AND data_type = 'character varying'
+          AND character_maximum_length = 50
     ) THEN
-        v_missing_items := array_append(v_missing_items, 'Column: public.audit_logs.actor_type (text)');
+        v_missing_items := array_append(v_missing_items, 'Column: public.audit_logs.actor_type (varchar(50))');
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns 
@@ -2043,19 +2064,25 @@ BEGIN
         v_missing_items := array_append(v_missing_items, 'Function: public.process_audit_log_capture');
     END IF;
 
-    -- 6. Check Critical Indexes & Unique Constraints (validating names, tables, and indexed column definitions)
-    -- Check 6a: Unique index on LOWER(email) in public.members
+    -- 6. Check Critical Indexes & Unique Constraints (verifying names, uniqueness, and indexed expressions/columns)
+    -- Check 6a: Unique index on LOWER(email) in public.members (asserts uniqueness and expression)
     IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes 
-        WHERE schemaname = 'public' 
-          AND tablename = 'members' 
-          AND indexname = 'idx_members_email_lower'
-          AND indexdef ILIKE '%lower(%email%)%'
+        SELECT 1 
+        FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indexrelid
+        JOIN pg_class t ON t.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_indexes pi ON pi.schemaname = n.nspname AND pi.tablename = t.relname AND pi.indexname = c.relname
+        WHERE n.nspname = 'public'
+          AND t.relname = 'members'
+          AND c.relname = 'idx_members_email_lower'
+          AND i.indisunique = TRUE
+          AND pi.indexdef ILIKE '%lower(%email%)%'
     ) THEN
-        v_missing_items := array_append(v_missing_items, 'Index: public.members.idx_members_email_lower ON LOWER(email)');
+        v_missing_items := array_append(v_missing_items, 'Index: public.members.idx_members_email_lower (UNIQUE on LOWER(email))');
     END IF;
 
-    -- Check 6b: Unique constraint / index on public.contributions (payment_channel, reference_number)
+    -- Check 6b: Unique constraint on public.contributions (payment_channel, reference_number)
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint con
         JOIN pg_class rel ON rel.oid = con.conrelid
@@ -2065,24 +2092,31 @@ BEGIN
           AND con.conname = 'uq_reference_payment'
           AND con.contype = 'u'
     ) AND NOT EXISTS (
-        SELECT 1 FROM pg_indexes
-        WHERE schemaname = 'public' 
-          AND tablename = 'contributions' 
-          AND indexname = 'uq_reference_payment'
-          AND indexdef ILIKE '%payment_channel%reference_number%'
+        SELECT 1 FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indexrelid
+        JOIN pg_class t ON t.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_indexes pi ON pi.schemaname = n.nspname AND pi.tablename = t.relname AND pi.indexname = c.relname
+        WHERE n.nspname = 'public'
+          AND t.relname = 'contributions'
+          AND c.relname = 'uq_reference_payment'
+          AND i.indisunique = TRUE
+          AND pi.indexdef ILIKE '%payment_channel%reference_number%'
     ) THEN
-        v_missing_items := array_append(v_missing_items, 'Constraint: public.contributions.uq_reference_payment UNIQUE (payment_channel, reference_number)');
+        v_missing_items := array_append(v_missing_items, 'Constraint: public.contributions.uq_reference_payment (UNIQUE on payment_channel, reference_number)');
     END IF;
 
-    -- Check 6c: HNSW Cosine Similarity Index on public.constitution_sections (embedding)
+    -- Check 6c: HNSW Cosine Similarity Index on public.constitution_sections (asserts HNSW method, embedding column, and cosine ops)
     IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes
+        SELECT 1 
+        FROM pg_indexes
         WHERE schemaname = 'public' 
           AND tablename = 'constitution_sections' 
           AND indexname = 'idx_sections_embedding'
-          AND indexdef ILIKE '%hnsw%vector_cosine_ops%'
+          AND indexdef ILIKE '%hnsw%'
+          AND indexdef ILIKE '%(embedding%vector_cosine_ops)%'
     ) THEN
-        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_sections_embedding (HNSW vector_cosine_ops)');
+        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_sections_embedding (HNSW on embedding with vector_cosine_ops)');
     END IF;
 
     -- 7. Check Active Row Level Security on ALL 10 Public Tables
@@ -2114,8 +2148,8 @@ END $$;
 | **P0-03** | Member identity protection | Trigger blocking self-service edits to names, `auth_user_id`, chapter, role, status | `002_members_and_directory.sql` | **Pos:** Member updates own nickname and avatar.<br>**Neg:** Member updates legal name, `auth_user_id`, or `club_chapter`; verify SQL exception. | Privilege Gate | **NOT EXECUTED** *(Scheduled for Privilege Gate)* |
 | **P1-01** | Audit privacy & actor attribution | Strict per-table allowlist with zero fallback leakage; trusted server actor attribution; regression fix on `expenses.new_data.category` | `008_audit_logs_and_triggers.sql` | **Pos 1:** Member mutation records allowlisted attributes only.<br>**Pos 2 (Regression Test):** Insert expense record (`category = 'venue_rental'`); verify audit log `new_data->>'category' = 'venue_rental'` is captured correctly and non-null.<br>**Neg:** Check audit log on ID cards (paths absent); check invitations (`token_hash` absent); check unallowlisted column exclusion. | Audit Gate | **NOT EXECUTED** *(Scheduled for Audit Gate)* |
 | **P1-02** | Attendance verification integrity | Server-controlled trigger binds `verified_by := v_caller.member_id` | `005_announcements_and_attendance.sql` | **Pos:** Officer marks attendance; verified_by set to Officer ID.<br>**Neg:** Officer passes third-party UUID as verified_by; verify server overrides with caller ID. | Attendance Gate | **NOT EXECUTED** *(Scheduled for Attendance Gate)* |
-| **P1-03** | Validated backup/restore runbook & automated assertions | Multi-point production guard (endpoint match, resolved IP match, environment whitelist), fail-fast `set -euo pipefail`, single transaction, topological FK order, exhaustive automated PL/pgSQL invariant assertions covering all member references and all public tables | Section 7.2 of plan | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity across all member references (recorded, approved, reversed, verified, closed), financial invariants, and RLS on all public tables.<br>**Neg 1:** Pass production host or IP; verify script halts immediately before connection.<br>**Neg 2:** Pass disallowed environment (`TARGET_ENV=production`); verify script halts immediately.<br>**Neg 3:** Pass corrupted archive; verify clean atomic rollback.<br>**Neg 4:** Backup contains orphan approved_by or reversed_by; verify post-restore assertion aborts and fails pipeline. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
-| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (10), columns/types, triggers (6), security functions (3), index/constraint definitions (`idx_members_email_lower`, `uq_reference_payment`, `idx_sections_embedding`), and active RLS on all 10 tables | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline, asserting column definitions and index expressions.<br>**Neg 1:** Drop table, column, trigger, or index/constraint; verify script raises fatal validation exception.<br>**Neg 2:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
+| **P1-03** | Validated backup/restore runbook & automated assertions | Multi-layer production guard (direct endpoint match, fail-closed DNS resolution comparing complete normalized IP sets via `comm -12`, environment whitelist), fail-fast `set -euo pipefail`, single transaction, topological FK order, exhaustive automated PL/pgSQL invariant assertions covering all member references and all public tables | Section 7.2 of plan | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity across all member references (recorded, approved, reversed, verified, closed), financial invariants, and RLS on all public tables.<br>**Neg 1:** Pass production host, or host where complete normalized IP set shares addresses with production; verify script halts immediately before connection.<br>**Neg 2:** Either DNS resolution fails or returns empty address set; verify script fails closed immediately.<br>**Neg 3:** Pass disallowed environment (`TARGET_ENV=production`); verify script halts immediately.<br>**Neg 4:** Pass corrupted archive; verify clean atomic rollback.<br>**Neg 5:** Backup contains orphan approved_by or reversed_by; verify post-restore assertion aborts and fails pipeline. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
+| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (10), columns/types (`audit_logs.actor_type varchar(50)`), triggers (6), security functions (3), index uniqueness (`idx_members_email_lower` `indisunique = true` on `LOWER(email)`), constraint uniqueness (`uq_reference_payment`), HNSW embedding index (`idx_sections_embedding` on `embedding` with `vector_cosine_ops`), and active RLS on all 10 tables | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline, asserting column types, index uniqueness, and indexed expressions.<br>**Neg 1:** Drop table, column, trigger, or index/constraint; verify script raises fatal validation exception.<br>**Neg 2:** Recreate email index without uniqueness or without `LOWER(email)`; verify script raises fatal validation exception.<br>**Neg 3:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
 | **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate | **NOT EXECUTED** *(Scheduled for RAG Gate)* |
 
 ---
