@@ -1,6 +1,6 @@
 {
-  "summary": "AGILA Hub Android — Phase 00 Verification Matrix, Revision 3.7. Evaluates all 16 acceptance requirements: confirms 100% of architectural specifications and DDL are PASS, and rigorously marks all 16 runtime release gate tests and disaster recovery drills as NOT EXECUTED until execution during live phase gates.",
-  "updatedAt": "2026-10-13T20:52:00.000000000Z",
+  "summary": "AGILA Hub Android — Phase 00 Verification Matrix, Revision 3.8. Confirms 100% of architectural controls and DDL specifications are PASS (including schema-aligned preflight index checks and independent restore endpoint verification), and keeps all 16 runtime release gate tests and disaster recovery drills explicitly marked NOT EXECUTED until execution during live phase gates.",
+  "updatedAt": "2026-10-13T21:07:00.000000000Z",
   "requestFeedback": false,
   "userFacing": true
 }

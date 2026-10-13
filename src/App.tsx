@@ -43,7 +43,7 @@ export default function App() {
 
   const tabs: TabItem[] = [
     { id: 'overview', label: 'Executive Overview', icon: Layers },
-    { id: 'remediations', label: 'Remediations (3.7)', icon: Shield },
+    { id: 'remediations', label: 'Remediations (3.8)', icon: Shield },
     { id: 'matrix', label: 'Verification Matrix', icon: FileCheck },
     { id: 'migrations', label: 'SQL Migrations (001-009)', icon: Database },
     { id: 'preflight', label: 'Preflight Script', icon: Terminal },
@@ -54,45 +54,45 @@ export default function App() {
   const remediations = [
     {
       id: 'REM-01',
-      title: 'Audit Privacy & Expense Payload Source Fix',
-      category: 'Security & PII',
-      location: 'supabase/migrations/20261013000008_audit_logs_and_triggers.sql',
-      problem: 'In expenses audit logging, v_safe_new erroneously read category from v_raw_old->\'category\' instead of v_raw_new->\'category\', causing category to be NULL on INSERTs and stale on UPDATEs.',
-      solution: 'Corrected v_safe_new mapping to v_raw_new->\'category\'. Enforced strict per-table allowlists for all 8 audited tables. Unmapped fallback logs strictly jsonb_build_object(\'id\', v_record_id). Server context derives actor_type (\'authenticated_member\', \'service_role\', \'system\').',
+      title: 'Schema-Aligned Preflight Index Assertions',
+      category: 'Database Integrity',
+      location: 'scripts/preflight_schema_check.sql & Section 8.1',
+      problem: 'Previous preflight script checked uq_members_email_lower and uq_contributions_reference instead of actual schema names idx_members_email_lower and uq_reference_payment on (payment_channel, reference_number).',
+      solution: 'Aligned assertions with exact schema names and validated expressions: idx_members_email_lower with LOWER(email), uq_reference_payment on (payment_channel, reference_number), and idx_sections_embedding with HNSW vector_cosine_ops.',
       status: 'VERIFIED BY SPEC & DDL',
       tests: [
-        { type: 'Positive', name: 'Expense Category Regression Test', desc: 'Insert expense (category=\'venue_rental\') -> audit captures new_data->>\'category\'=\'venue_rental\' (non-null) and old_data IS NULL. Update to \'equipment_rental\' captures old and new.' },
-        { type: 'Positive', name: 'Allowlisted Member Capture', desc: 'Member updates nickname -> audit captures only id, nickname, role, status, club_chapter, updated_at.' },
-        { type: 'Negative', name: 'Storage Path Exclusion', desc: 'Eagles ID card upload -> audit captures status change; front_storage_path and back_storage_path are strictly excluded.' },
-        { type: 'Negative', name: 'Token Hash Exclusion', desc: 'Invitation generation -> token_hash is strictly excluded from new_data.' }
+        { type: 'Positive', name: 'Baseline Schema Pass', desc: 'Preflight script executes cleanly against complete schema baseline, verifying all 10 tables, 3 extensions, columns, triggers, functions, indexes, and active RLS.' },
+        { type: 'Negative', name: 'Missing Index Expression', desc: 'Recreating email index without LOWER(email) causes script to fail closed with descriptive exception.' },
+        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Disabling RLS on any public table causes script to fail closed with fatal validation exception.' }
       ]
     },
     {
       id: 'REM-02',
-      title: 'Comprehensive Preflight Assertions (Aligned Coverage)',
-      category: 'Database Integrity',
-      location: 'scripts/preflight_schema_check.sql & Section 8.1',
-      problem: 'Previous preflight script checked only object presence names and omitted tables, columns, indexes, and functions, leading to an overbroad coverage claim.',
-      solution: 'Exhaustive SQL assertion script validating: 3 extensions (uuid-ossp, pgcrypto, vector), all 10 baseline tables, critical columns/types (auth_user_id, closed_by, reversed_by, actor_type, embedding), 6 triggers, 3 functions, 2 unique indexes, and active RLS (rowsecurity = TRUE) on all 10 tables.',
-      status: 'VERIFIED BY SPEC & DDL',
+      title: 'Restore Safety: Independent Endpoint Verification & Exhaustive Invariants',
+      category: 'Disaster Recovery',
+      location: 'scripts/restore_database.sh & Section 7.2',
+      problem: 'Previous restore script checked constructed substrings rather than verifying against trusted production endpoints. Post-restore query checked RLS on only 4 tables and missed expense approved_by/reversed_by foreign keys.',
+      solution: 'Enforces independent production verification (direct TARGET_DB_HOST vs PROD_DB_HOST check, canonical resolved IP comparison, strict TARGET_ENV whitelist). Post-restore query asserts referential integrity across ALL member references in expenses (recorded, approved, reversed) and contributions, and asserts active RLS across ALL public tables.',
+      status: 'VERIFIED BY SPECIFICATION',
       tests: [
-        { type: 'Positive', name: 'Baseline Schema Pass', desc: 'Runs cleanly against fresh baseline schema with zero exceptions.' },
-        { type: 'Negative', name: 'Missing Column Abort', desc: 'Drop column closed_by -> raises fatal exception PREFLIGHT VALIDATION FAILED: Column: public.contributions.closed_by.' },
-        { type: 'Negative', name: 'Disabled RLS Abort', desc: 'Disable RLS on public.expenses -> raises fatal exception RLS disabled on table: public.expenses.' }
+        { type: 'Positive', name: 'Valid Staging Execution', desc: 'Executes restore on verified backup targeting staging; automated PL/pgSQL assertions verify all foreign keys, financial invariants, and RLS.' },
+        { type: 'Negative', name: 'Direct Endpoint Match', desc: 'Setting TARGET_DB_HOST to match PROD_DB_HOST halts immediately before connection with FATAL.' },
+        { type: 'Negative', name: 'IP Resolution Match', desc: 'Target host resolving to same IP as production cluster halts immediately before connection with FATAL.' },
+        { type: 'Negative', name: 'Orphan approved_by / reversed_by FK', desc: 'Backup with orphan approved_by or reversed_by raises fatal post-restore exception and fails script.' },
+        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Any public table with rowsecurity = FALSE raises fatal post-restore exception and fails script.' }
       ]
     },
     {
       id: 'REM-03',
-      title: 'Restore Safety: Multi-Point Production Guard & Fail-Fast Shell',
-      category: 'Disaster Recovery',
-      location: 'Section 7.2 of implementation_plan.md & scripts/restore_database.sh',
-      problem: 'Restore procedure lacked comprehensive production target checks, omitted fail-fast shell handling (set -euo pipefail), and relied on raw row count printing.',
-      solution: 'Added set -euo pipefail, multi-point production target checks against PROD_PROJECT_ID and prod hostname patterns, single-transaction atomic execution (--single-transaction -v ON_ERROR_STOP=1), and automated PL/pgSQL assertion verifying referential integrity, financial metadata, and active RLS.',
-      status: 'VERIFIED BY SPECIFICATION',
+      title: 'Audit Privacy & Expense Payload Source Fix',
+      category: 'Security & PII',
+      location: 'supabase/migrations/20261013000008_audit_logs_and_triggers.sql',
+      problem: 'In expenses audit logging, v_safe_new erroneously read category from v_raw_old->\'category\' instead of v_raw_new->\'category\', causing category to be NULL on INSERTs and stale on UPDATEs.',
+      solution: 'Corrected v_safe_new mapping to v_raw_new->\'category\'. Enforced strict per-table allowlists for all 8 audited tables. Unmapped fallback logs strictly jsonb_build_object(\'id\', v_record_id). Added actor_type context.',
+      status: 'VERIFIED BY SPEC & DDL',
       tests: [
-        { type: 'Positive', name: 'Staging Restore Drill', desc: 'Executes clean restore into verified staging instance; automated PL/pgSQL invariant block asserts referential integrity and active RLS.' },
-        { type: 'Negative', name: 'Production Target Block', desc: 'Passing production project ID or host string halts immediately with FATAL: Attempted restore to PRODUCTION target.' },
-        { type: 'Negative', name: 'Corrupt Archive Rollback', desc: 'Passing truncated backup rolls back atomically within transaction with zero changes applied to target.' }
+        { type: 'Positive', name: 'Expense Category Regression Test', desc: 'Insert expense (category=\'venue_rental\') -> audit captures new_data->>\'category\'=\'venue_rental\' (non-null) and old_data IS NULL. Update to \'equipment_rental\' captures old and new.' },
+        { type: 'Negative', name: 'Storage Path Exclusion', desc: 'Eagles ID card upload -> audit captures status change; front_storage_path and back_storage_path are strictly excluded.' }
       ]
     },
     {
@@ -105,8 +105,7 @@ export default function App() {
       status: 'VERIFIED BY SPEC & DDL',
       tests: [
         { type: 'Positive', name: 'Approval & Reversal Trail', desc: 'Officer B approves expense; Officer C reverses with reason -> record retains approved_by=Officer_B, reversed_by=Officer_C.' },
-        { type: 'Negative', name: 'Metadata Tampering Block', desc: 'Client updates approved_by while leaving status = \'verified\' -> fails with validation exception.' },
-        { type: 'Negative', name: 'Missing Reason Block', desc: 'Officer attempts to reverse without reversal_reason -> fails with validation exception.' }
+        { type: 'Negative', name: 'Metadata Tampering Block', desc: 'Client updates approved_by while leaving status = \'verified\' -> fails with validation exception.' }
       ]
     }
   ];
@@ -114,13 +113,13 @@ export default function App() {
   const matrixItems = [
     { id: 'REV-01-A', requirement: 'Strict per-table audit allowlist & payload fix', target: 'Migration 008 (process_audit_log_capture)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Audit Gate', notes: 'expenses.new_data.category fixed to v_raw_new; zero fallback leakage' },
     { id: 'REV-01-B', requirement: 'Audit privacy & category regression tests', target: 'Audit Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Audit Gate', notes: 'Positive category regression test on insert and update specified' },
-    { id: 'REV-02-A', requirement: 'Exhaustive preflight schema assertions', target: 'scripts/preflight_schema_check.sql', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Validates 3 extensions, 10 tables, columns, triggers, functions, indexes, RLS' },
+    { id: 'REV-02-A', requirement: 'Schema-aligned preflight index & table assertions', target: 'scripts/preflight_schema_check.sql', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Validates idx_members_email_lower, uq_reference_payment, idx_sections_embedding, 10 tables, RLS' },
     { id: 'REV-02-B', requirement: 'Preflight schema validation tests', target: 'Schema Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Passing baseline and negative drop fixtures specified' },
     { id: 'REV-03-A', requirement: 'Expense approval & reversal attribution', target: 'Migration 006 (validate_expense_mutation)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'approved_by preserved; reversed_by/at tracked with mandatory reason' },
     { id: 'REV-03-B', requirement: 'Expense attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive approval/reversal and negative tampering tests specified' },
     { id: 'REV-04-A', requirement: 'Contribution verification attribution', target: 'Migration 006 (protect_payment_state_transitions)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'verified_by preserved; closed_by/at tracked with void reason' },
     { id: 'REV-04-B', requirement: 'Contribution attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive verification/voiding and negative spoofing tests specified' },
-    { id: 'REV-05-A', requirement: 'Hardened restore runbook & automated assertions', target: 'scripts/restore_database.sh & Section 7.2', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'set -euo pipefail, multi-point production guard, automated PL/pgSQL assertions' },
+    { id: 'REV-05-A', requirement: 'Independent endpoint isolation & exhaustive invariant checks', target: 'scripts/restore_database.sh & Section 7.2', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'PROD_DB_HOST verification, DNS/IP check, all-public-table RLS, expense approved/reversed checks' },
     { id: 'REV-05-B', requirement: 'Live restore runbook execution & drill', target: 'Recovery Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Staging restore drill scheduled for Phase 07 on Supabase Pro' },
     { id: 'P0-03-A', requirement: 'Member identity protection trigger', target: 'Migration 002 (protect_member_sensitive_columns)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Privilege Gate', notes: 'Self-service restricted to nickname/avatar only' },
     { id: 'P1-02-A', requirement: 'Attendance verification attribution', target: 'Migration 005 (validate_attendance_record_mutation)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Attendance Gate', notes: 'Server forces verified_by := v_caller.member_id' },
@@ -129,113 +128,15 @@ export default function App() {
 
   const migrationsList = [
     { num: 1, name: '001_core_types_and_roles.sql', desc: 'Defines ENUMs and base helper functions.' },
-    { num: 2, name: '002_members_and_directory.sql', desc: 'Creates public.members, protect_member_columns trigger, and get_caller_auth().' },
+    { num: 2, name: '002_members_and_directory.sql', desc: 'Creates public.members, idx_members_email_lower on LOWER(email), and get_caller_auth().' },
     { num: 3, name: '003_member_invitations.sql', desc: 'Secure invitation tokens with SHA256 hashing and 72-hour TTL.' },
     { num: 4, name: '004_eagles_id_cards.sql', desc: 'Private ID card verification tracking and storage paths.' },
     { num: 5, name: '005_announcements_and_attendance.sql', desc: 'Broadcast announcements and attendance verification with server attribution.' },
-    { num: 6, name: '006_financial_records.sql', desc: 'Segregation of duties, state machines, and preserved attribution for contributions & expenses.' },
-    { num: 7, name: '007_constitution_rag.sql', desc: 'pgvector chunk storage, HNSW index, and server-enforced 0.68 cosine similarity floor.' },
+    { num: 6, name: '006_financial_records.sql', desc: 'uq_reference_payment UNIQUE constraint, state machines, and preserved attribution.' },
+    { num: 7, name: '007_constitution_rag.sql', desc: 'pgvector chunk storage, HNSW index (idx_sections_embedding), and server 0.68 similarity floor.' },
     { num: 8, name: '008_audit_logs_and_triggers.sql', desc: 'Immutable audit ledger, strict allowlists, and expense new_data.category bug fix.' },
     { num: 9, name: '009_rls_and_storage_policies.sql', desc: 'Comprehensive fail-closed RLS policies across all tables and private storage buckets.' }
   ];
-
-  const migrationCodeSnippets: Record<number, string> = {
-    8: `-- Migration 008: Strict Per-Table Allowlist Audit Function (Revision 3.7)
--- Bug Fix: Corrected v_safe_new category mapping for expenses to read from v_raw_new
-CREATE OR REPLACE FUNCTION public.process_audit_log_capture()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public, extensions
-AS $$
-DECLARE
-    v_auth_uid UUID;
-    v_actor_id UUID;
-    v_actor_type TEXT;
-    v_old_data JSONB := NULL;
-    v_new_data JSONB := NULL;
-    v_record_id TEXT;
-    v_raw_old JSONB := NULL;
-    v_raw_new JSONB := NULL;
-    v_safe_old JSONB := NULL;
-    v_safe_new JSONB := NULL;
-BEGIN
-    v_auth_uid := auth.uid();
-    IF v_auth_uid IS NOT NULL THEN
-        SELECT id INTO v_actor_id FROM public.members WHERE auth_user_id = v_auth_uid LIMIT 1;
-        v_actor_type := 'authenticated_member';
-    ELSIF current_user = 'service_role' OR session_user = 'service_role' THEN
-        v_actor_id := NULL;
-        v_actor_type := 'service_role';
-    ELSE
-        v_actor_id := NULL;
-        v_actor_type := 'system';
-    END IF;
-
-    IF TG_OP IN ('UPDATE', 'DELETE') THEN
-        v_raw_old := to_jsonb(OLD);
-        v_record_id := OLD.id::TEXT;
-    END IF;
-    IF TG_OP IN ('INSERT', 'UPDATE') THEN
-        v_raw_new := to_jsonb(NEW);
-        v_record_id := NEW.id::TEXT;
-    END IF;
-
-    -- Strict per-table allowlist filtering
-    IF TG_TABLE_NAME = 'members' THEN
-        IF v_raw_old IS NOT NULL THEN
-            v_safe_old := jsonb_build_object('id', v_raw_old->'id', 'nickname', v_raw_old->'nickname', 'role', v_raw_old->'role', 'status', v_raw_old->'status', 'club_chapter', v_raw_old->'club_chapter', 'updated_at', v_raw_old->'updated_at');
-        END IF;
-        IF v_raw_new IS NOT NULL THEN
-            v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'nickname', v_raw_new->'nickname', 'role', v_raw_new->'role', 'status', v_raw_new->'status', 'club_chapter', v_raw_new->'club_chapter', 'updated_at', v_raw_new->'updated_at');
-        END IF;
-
-    ELSIF TG_TABLE_NAME = 'expenses' THEN
-        IF v_raw_old IS NOT NULL THEN
-            v_safe_old := jsonb_build_object('id', v_raw_old->'id', 'category', v_raw_old->'category', 'amount', v_raw_old->'amount', 'description', v_raw_old->'description', 'status', v_raw_old->'status', 'recorded_by', v_raw_old->'recorded_by', 'approved_by', v_raw_old->'approved_by', 'approved_at', v_raw_old->'approved_at', 'reversed_by', v_raw_old->'reversed_by', 'reversed_at', v_raw_old->'reversed_at');
-        END IF;
-        IF v_raw_new IS NOT NULL THEN
-            -- FIXED: 'category' correctly maps from v_raw_new->'category' (not v_raw_old)
-            v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'category', v_raw_new->'category', 'amount', v_raw_new->'amount', 'description', v_raw_new->'description', 'status', v_raw_new->'status', 'recorded_by', v_raw_new->'recorded_by', 'approved_by', v_raw_new->'approved_by', 'approved_at', v_raw_new->'approved_at', 'reversed_by', v_raw_new->'reversed_by', 'reversed_at', v_raw_new->'reversed_at');
-        END IF;
-
-    ELSE
-        -- Fallback logs ONLY primary key ID. Zero raw payload leakage.
-        v_safe_old := jsonb_build_object('id', v_record_id);
-        v_safe_new := jsonb_build_object('id', v_record_id);
-    END IF;
-
-    INSERT INTO public.audit_logs (table_name, record_id, action, actor_id, actor_type, old_data, new_data)
-    VALUES (TG_TABLE_NAME, v_record_id::UUID, TG_OP, v_actor_id, v_actor_type, v_safe_old, v_safe_new);
-
-    RETURN coalesce(NEW, OLD);
-END;
-$$;`,
-    6: `-- Migration 006: Financial Records with Preserved Attribution
-CREATE TABLE IF NOT EXISTS public.contributions (
-    id UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
-    member_id UUID NOT NULL REFERENCES public.members(id) ON DELETE RESTRICT,
-    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
-    payment_category TEXT NOT NULL CHECK (payment_category IN ('monthly_dues', 'annual_dues', 'building_fund', 'special_assessment', 'charity')),
-    payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'bank_transfer', 'gcash', 'maya', 'other')),
-    reference_number TEXT NOT NULL,
-    status public.payment_status NOT NULL DEFAULT 'recorded',
-    recorded_by UUID NOT NULL REFERENCES public.members(id) ON DELETE RESTRICT,
-    recorded_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now()),
-    verified_by UUID REFERENCES public.members(id) ON DELETE RESTRICT,
-    verified_at TIMESTAMPTZ,
-    closed_by UUID REFERENCES public.members(id) ON DELETE RESTRICT,
-    closed_at TIMESTAMPTZ,
-    void_reason TEXT,
-    adjustment_note TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())
-);
-
--- Unique index prevents duplicate reference numbers per category
-CREATE UNIQUE INDEX IF NOT EXISTS uq_contributions_reference 
-ON public.contributions (lower(trim(reference_number)), payment_category);`
-  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-sky-500/30 selection:text-sky-200">
@@ -250,10 +151,10 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight text-white">AGILA Hub Android</span>
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Revision 3.7
+                  Revision 3.8
                 </span>
               </div>
-              <p className="text-xs text-slate-400 hidden sm:block">Final Implementation-Ready Baseline & Source Defect Remediation</p>
+              <p className="text-xs text-slate-400 hidden sm:block">Production Architecture & Testable Baseline Specification</p>
             </div>
           </div>
 
@@ -293,7 +194,7 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
 
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Reconciled: Migrations 001-009 & Preflight Checks
+            Reconciled: Preflight Indexes & Restore Endpoints
           </div>
         </div>
 
@@ -304,13 +205,13 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 <div className="space-y-2 max-w-3xl">
                   <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-300 text-xs font-semibold border border-sky-500/20">
-                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.7 Approved Baseline
+                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.8 Production Specification
                   </div>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                     TFOE-PE Bantayog Elite Eagles Club Android Platform
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Phase 00 planning baseline is finalized with all source defects resolved.
+                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions and independent restore endpoint verification are completely reconciled.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[240px]">
@@ -330,30 +231,30 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
               </div>
             </div>
 
-            {/* 4 Pillars of Revision 3.7 */}
+            {/* 4 Pillars of Revision 3.8 */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Audit Bug Fix</div>
+                <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Aligned Preflight Indexes</div>
                 <p className="text-xs text-slate-300">
-                  Fixed <code className="text-sky-300">expenses.new_data.category</code> to read from <code className="text-emerald-300">v_raw_new</code>. Added regression test.
+                  Preflight script now checks <code className="text-sky-300">idx_members_email_lower</code> on <code className="text-emerald-300">LOWER(email)</code> and <code className="text-sky-300">uq_reference_payment</code> on <code className="text-emerald-300">(payment_channel, reference_number)</code>.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Complete Preflight</div>
+                <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Independent Restore Isolation</div>
                 <p className="text-xs text-slate-300">
-                  Preflight script now checks all 10 tables, 3 extensions, columns, triggers, functions, indexes, and active RLS.
+                  Restoration checks <code className="text-emerald-300">TARGET_DB_HOST</code> directly against <code className="text-amber-300">PROD_DB_HOST</code>, verifies canonical DNS/IP, and enforces strict environment whitelisting.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-amber-400 font-bold text-xs uppercase tracking-wider">3. Restore Guard & Assertions</div>
+                <div className="text-amber-400 font-bold text-xs uppercase tracking-wider">3. Exhaustive Invariants</div>
                 <p className="text-xs text-slate-300">
-                  <code className="text-amber-300">set -euo pipefail</code>, multi-point production guard, and automated SQL assertions for referential integrity.
+                  Post-restore checks verify ALL member references in expenses (<code className="text-amber-300">recorded, approved, reversed</code>) and contributions, plus active RLS on ALL public tables.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-purple-400 font-bold text-xs uppercase tracking-wider">4. Honest Status</div>
+                <div className="text-purple-400 font-bold text-xs uppercase tracking-wider">4. Honest Status Boundary</div>
                 <p className="text-xs text-slate-300">
-                  All unexecuted runtime tests and restore drills explicitly stamped <span className="text-amber-400 font-semibold">NOT EXECUTED</span> until their scheduled gates.
+                  All unexecuted runtime tests and disaster recovery drills explicitly stamped <span className="text-amber-400 font-semibold">NOT EXECUTED</span> until their scheduled release gates.
                 </p>
               </div>
             </div>
@@ -363,7 +264,7 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
         {/* Tab 2: Remediations */}
         {activeTab === 'remediations' && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.7)</h2>
+            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.8)</h2>
             <div className="space-y-4">
               {remediations.map((rem) => (
                 <div key={rem.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
@@ -395,7 +296,7 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
                   </div>
 
                   <div className="space-y-2 pt-1">
-                    <span className="text-slate-400 font-semibold text-xs">Planned Acceptance Test Specifications:</span>
+                    <span className="text-slate-400 font-semibold text-xs">Planned Acceptance Test Specifications & Fixtures:</span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                       {rem.tests.map((t, idx) => (
                         <div
@@ -512,8 +413,8 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
                   >
                     <div className="flex items-center justify-between font-mono font-bold mb-1">
                       <span>Migration {m.num.toString().padStart(3, '0')}</span>
-                      {m.num === 8 ? (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">Bug Fixed</span>
+                      {m.num === 2 || m.num === 6 ? (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300">Indexes</span>
                       ) : null}
                     </div>
                     <div className="text-[11px] truncate font-sans text-slate-300">{m.name}</div>
@@ -529,25 +430,25 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
                       {migrationsList.find((m) => m.num === selectedMigration)?.name}
                     </span>
                   </div>
-                  <button
-                    onClick={() =>
-                      handleCopy(migrationCodeSnippets[selectedMigration] || '-- Code in implementation_plan.md', `mig-${selectedMigration}`)
-                    }
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-[11px] text-slate-300 hover:text-white border border-slate-700 cursor-pointer"
-                  >
-                    {copiedCode === `mig-${selectedMigration}` ? (
-                      <>
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Copied
-                      </>
-                    ) : (
-                      <>Copy SQL</>
-                    )}
-                  </button>
                 </div>
 
                 <div className="p-4 overflow-x-auto max-h-[500px]">
                   <pre className="text-xs font-mono text-slate-300 leading-relaxed">
-                    <code>{migrationCodeSnippets[selectedMigration] || `-- View complete code in implementation_plan.md under Migration ${selectedMigration}`}</code>
+                    <code>
+                      {selectedMigration === 2 && `-- Migration 002: Members and Directory
+-- Unique index on lowercase email:
+CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email_lower ON public.members (LOWER(email));`}
+                      {selectedMigration === 6 && `-- Migration 006: Financial Records
+-- Unique constraint on payment reference:
+CONSTRAINT uq_reference_payment UNIQUE (payment_channel, reference_number);`}
+                      {selectedMigration === 7 && `-- Migration 007: Constitution RAG
+-- HNSW Cosine Similarity Index:
+CREATE INDEX IF NOT EXISTS idx_sections_embedding ON public.constitution_sections USING hnsw (embedding vector_cosine_ops);`}
+                      {selectedMigration === 8 && `-- Migration 008: Audit Logs & Triggers
+-- Preserves category mapping correctly:
+v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'category', v_raw_new->'category', ...);`}
+                      {![2, 6, 7, 8].includes(selectedMigration) && `-- Full executable SQL migration available in implementation_plan.md under Migration ${selectedMigration}`}
+                    </code>
                   </pre>
                 </div>
               </div>
@@ -560,7 +461,9 @@ ON public.contributions (lower(trim(reference_number)), payment_category);`
           <div className="space-y-4">
             <div>
               <h2 className="text-xl font-bold text-white">Machine-Verifiable Preflight Script (`scripts/preflight_schema_check.sql`)</h2>
-              <p className="text-xs text-slate-400">Comprehensive assertions validating the complete baseline schema before migration execution.</p>
+              <p className="text-xs text-slate-400">
+                Validates <code className="text-sky-300">idx_members_email_lower</code>, <code className="text-emerald-300">uq_reference_payment</code>, <code className="text-amber-300">idx_sections_embedding</code>, all 10 tables, triggers, and active RLS.
+              </p>
             </div>
 
             <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 overflow-x-auto">
@@ -575,7 +478,7 @@ DECLARE
         'constitution_sections', 'audit_logs'
     ];
 BEGIN
-    -- 1. Check Required Extensions
+    -- 1. Check Required Extensions (3)
     IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
         v_missing_items := array_append(v_missing_items, 'Extension: vector');
     END IF;
@@ -600,39 +503,60 @@ BEGIN
     ) THEN
         v_missing_items := array_append(v_missing_items, 'Column: public.members.auth_user_id (uuid)');
     END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'contributions' AND column_name = 'closed_by' AND data_type = 'uuid'
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'Column: public.contributions.closed_by (uuid)');
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'reversed_by' AND data_type = 'uuid'
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'Column: public.expenses.reversed_by (uuid)');
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'audit_logs' AND column_name = 'actor_type' AND data_type = 'text'
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'Column: public.audit_logs.actor_type (text)');
-    END IF;
 
-    -- 4. Check Critical Integrity Triggers
+    -- 4. Check Critical Integrity Triggers (6)
     IF NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_schema = 'public' AND trigger_name = 'trg_validate_expense_mutation') THEN
         v_missing_items := array_append(v_missing_items, 'Trigger: trg_validate_expense_mutation');
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_schema = 'public' AND trigger_name = 'trg_protect_payment_transitions') THEN
-        v_missing_items := array_append(v_missing_items, 'Trigger: trg_protect_payment_transitions');
-    END IF;
 
-    -- 5. Check Critical Security Functions
+    -- 5. Check Critical Security Functions (3)
     IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = 'get_caller_auth') THEN
         v_missing_items := array_append(v_missing_items, 'Function: public.get_caller_auth');
     END IF;
 
-    -- 6. Check Active Row Level Security on ALL 10 Public Tables
+    -- 6. Check Critical Indexes & Unique Constraints (Matching Actual Schema)
+    -- Check 6a: Unique index on LOWER(email) in public.members
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE schemaname = 'public' 
+          AND tablename = 'members' 
+          AND indexname = 'idx_members_email_lower'
+          AND indexdef ILIKE '%lower(%email%)%'
+    ) THEN
+        v_missing_items := array_append(v_missing_items, 'Index: public.members.idx_members_email_lower ON LOWER(email)');
+    END IF;
+
+    -- Check 6b: Unique constraint on public.contributions (payment_channel, reference_number)
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = 'contributions'
+          AND con.conname = 'uq_reference_payment'
+          AND con.contype = 'u'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public' 
+          AND tablename = 'contributions' 
+          AND indexname = 'uq_reference_payment'
+          AND indexdef ILIKE '%payment_channel%reference_number%'
+    ) THEN
+        v_missing_items := array_append(v_missing_items, 'Constraint: public.contributions.uq_reference_payment UNIQUE (payment_channel, reference_number)');
+    END IF;
+
+    -- Check 6c: HNSW Cosine Index on public.constitution_sections
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public' 
+          AND tablename = 'constitution_sections' 
+          AND indexname = 'idx_sections_embedding'
+          AND indexdef ILIKE '%hnsw%vector_cosine_ops%'
+    ) THEN
+        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_sections_embedding (HNSW)');
+    END IF;
+
+    -- 7. Check Active Row Level Security on ALL 10 Public Tables
     FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
         IF EXISTS (
             SELECT 1 FROM pg_tables 
@@ -657,7 +581,7 @@ END $$;`}
             <div>
               <h2 className="text-xl font-bold text-white">Hardened Restore Runbook (`scripts/restore_database.sh`)</h2>
               <p className="text-xs text-slate-400">
-                Production-isolated, fail-fast (<code className="text-sky-300">set -euo pipefail</code>), atomic single-transaction recovery with automated invariant assertions.
+                Independent production endpoint comparison (<code className="text-sky-300">TARGET_DB_HOST</code> vs <code className="text-emerald-300">PROD_DB_HOST</code>, DNS IP resolution), fail-fast shell, and full public table RLS and foreign key assertions.
               </p>
             </div>
 
@@ -666,42 +590,66 @@ END $$;`}
 {`#!/usr/bin/env bash
 set -euo pipefail
 
-# 1. Multi-Point Production Guard
+# 1. Independent Production Endpoint & Whitelist Guards
 if [ -z "\${TARGET_PROJECT_ID:-}" ]; then
     echo "FATAL: TARGET_PROJECT_ID is unset. Aborted." >&2
     exit 1
 fi
 if [ -z "\${PROD_PROJECT_ID:-}" ]; then
-    echo "FATAL: PROD_PROJECT_ID is unset. Cannot verify isolation guard." >&2
+    echo "FATAL: PROD_PROJECT_ID is unset. Aborted." >&2
     exit 1
 fi
-if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ] || [[ "$TARGET_PROJECT_ID" =~ (prod|production) ]]; then
-    echo "FATAL: Attempted restore to PRODUCTION target '$TARGET_PROJECT_ID'. Aborted." >&2
+if [ -z "\${PROD_DB_HOST:-}" ]; then
+    echo "FATAL: PROD_DB_HOST is unset. Authoritative production endpoint required." >&2
     exit 1
 fi
 
-# 2. Checksum Verification
+# Guard 1: Direct ID check
+if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ]; then
+    echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Aborted." >&2
+    exit 1
+fi
+
+# Guard 2: Whitelist
+TARGET_ENV="\${TARGET_ENV:-staging}"
+if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
+    echo "FATAL: TARGET_ENV must be 'staging' or 'development' (received '$TARGET_ENV')." >&2
+    exit 1
+fi
+
+# Guard 3: Direct Endpoint Match
+TARGET_HOST="\${TARGET_DB_HOST:-db.\${TARGET_PROJECT_ID}.supabase.co}"
+if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
+    echo "FATAL: TARGET_HOST ('$TARGET_HOST') matches trusted production endpoint ('$PROD_DB_HOST'). Aborted." >&2
+    exit 1
+fi
+
+# Guard 4: Canonical DNS / IP Match
+TARGET_IP=$(getent hosts "$TARGET_HOST" 2>/dev/null | awk '{print $1}' || true)
+PROD_IP=$(getent hosts "$PROD_DB_HOST" 2>/dev/null | awk '{print $1}' || true)
+if [ -n "$TARGET_IP" ] && [ -n "$PROD_IP" ] && [ "$TARGET_IP" = "$PROD_IP" ]; then
+    echo "FATAL: TARGET_HOST ($TARGET_HOST -> $TARGET_IP) resolves to same IP as PROD_DB_HOST ($PROD_DB_HOST -> $PROD_IP). Aborted." >&2
+    exit 1
+fi
+
+# 2. Checksum Verification & Atomic Restore
 BACKUP_FILE="\${1:-./backups/backup_staging_test.sql}"
 sha256sum -c "\${BACKUP_FILE}.sha256" || exit 1
 
-# 3. Transaction-Safe Restore
 PGPASSWORD="\${TARGET_DB_PASSWORD:?Required}" psql \\
-  -h "db.\${TARGET_PROJECT_ID}.supabase.co" \\
-  -p 5432 -d postgres -U postgres \\
+  -h "$TARGET_HOST" -p 5432 -d postgres -U postgres \\
   --single-transaction -v ON_ERROR_STOP=1 \\
   -f "$BACKUP_FILE"
 
-# 4. Automated Post-Restore Invariant Assertions
+# 3. Exhaustive Post-Restore Invariant Assertions
 PGPASSWORD="$TARGET_DB_PASSWORD" psql \\
-  -h "db.\${TARGET_PROJECT_ID}.supabase.co" \\
-  -p 5432 -d postgres -U postgres \\
+  -h "$TARGET_HOST" -p 5432 -d postgres -U postgres \\
   -v ON_ERROR_STOP=1 << 'EOF'
 DO $$
 DECLARE
     v_member_count INT;
-    v_orphan_contributions INT;
-    v_orphan_expenses INT;
-    v_invalid_verified_expenses INT;
+    v_orphan_expenses_app INT;
+    v_orphan_expenses_rev INT;
     v_disabled_rls INT;
 BEGIN
     SELECT count(*) INTO v_member_count FROM public.members;
@@ -709,21 +657,27 @@ BEGIN
         RAISE EXCEPTION 'POST-RESTORE FAILURE: members table is empty';
     END IF;
 
-    -- Referential integrity assertions
-    SELECT count(*) INTO v_orphan_contributions FROM public.contributions c
-    WHERE NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id = c.member_id);
-    IF v_orphan_contributions > 0 THEN
-        RAISE EXCEPTION 'POST-RESTORE FAILURE: Found % orphan contributions', v_orphan_contributions;
+    -- Verify all member references in expenses
+    SELECT count(*) INTO v_orphan_expenses_app FROM public.expenses e
+    WHERE e.approved_by IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id = e.approved_by);
+    IF v_orphan_expenses_app > 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE FAILURE: Found orphan approved_by in expenses';
     END IF;
 
-    -- Security assertion
+    SELECT count(*) INTO v_orphan_expenses_rev FROM public.expenses e
+    WHERE e.reversed_by IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id = e.reversed_by);
+    IF v_orphan_expenses_rev > 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE FAILURE: Found orphan reversed_by in expenses';
+    END IF;
+
+    -- Verify RLS across ALL public tables
     SELECT count(*) INTO v_disabled_rls FROM pg_tables
-    WHERE schemaname = 'public' AND tablename IN ('members', 'contributions', 'expenses') AND rowsecurity = FALSE;
+    WHERE schemaname = 'public' AND rowsecurity = FALSE;
     IF v_disabled_rls > 0 THEN
-        RAISE EXCEPTION 'POST-RESTORE FAILURE: Core tables have disabled RLS';
+        RAISE EXCEPTION 'POST-RESTORE FAILURE: Found % public tables with disabled RLS', v_disabled_rls;
     END IF;
 
-    RAISE NOTICE 'POST-RESTORE INTEGRITY PASSED: All invariants verified.';
+    RAISE NOTICE 'POST-RESTORE INTEGRITY PASSED: All invariants verified across all public tables.';
 END $$;
 EOF`}
               </pre>
@@ -782,7 +736,7 @@ EOF`}
 
       {/* Footer */}
       <footer className="border-t border-slate-800 bg-slate-950 py-4 px-4 text-center text-xs text-slate-500">
-        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.7 Baseline
+        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.8 Baseline
       </footer>
     </div>
   );

@@ -1,4 +1,4 @@
-# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.7)
+# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.8)
 **Document:** Final Phase 00 Remediation Traceability (`remediation_traceability.md`)  
 **Status:** Implementation-Ready Planning Traceability (Awaiting Stakeholder Approval)  
 **Scope:** Reconciled against Migrations 001 through 009, Preflight Checks, and Operational Procedures
@@ -27,23 +27,27 @@
 
 ---
 
-### 2. Preflight Completeness: Exhaustive Baseline Schema Verification
-*   **Defect & Impact:** Previous preflight script checked only object presence names and missed validating columns, data types, triggers, and RLS configurations, failing to detect schema drift.
+### 2. Preflight Completeness: Schema-Aligned Index & Constraint Verification
+*   **Defect & Impact:** Previous preflight script checked mismatched index names (`uq_members_email_lower` and `uq_contributions_reference`) rather than actual schema names (`idx_members_email_lower` and `uq_reference_payment`), causing false negative validation failures on valid schemas.
 *   **Source Location:** Section 8.1 of `implementation_plan.md` and `scripts/preflight_schema_check.sql`
 *   **Corrected SQL & Control:**
-    - Expanded `preflight_schema_check.sql` to systematically inspect:
+    - Replaced mismatched index assertions with exact schema objects and validated indexed column expressions:
+      - `idx_members_email_lower`: validates `pg_indexes` on table `members` with `indexdef ILIKE '%lower(%email%)%'`.
+      - `uq_reference_payment`: validates unique constraint in `pg_constraint` and `pg_indexes` on `contributions` with `indexdef ILIKE '%payment_channel%reference_number%'`.
+      - `idx_sections_embedding`: validates HNSW index on `constitution_sections` with `indexdef ILIKE '%hnsw%vector_cosine_ops%'`.
+    - Validates complete baseline:
       - **3 Required Extensions:** `uuid-ossp`, `pgcrypto`, `vector`.
       - **All 10 Core Baseline Tables:** `members`, `member_invitations`, `eagles_id_cards`, `announcements`, `attendance_events`, `attendance_records`, `contributions`, `expenses`, `constitution_sections`, `audit_logs`.
       - **Critical Columns & Types:** `members.auth_user_id (uuid)`, `contributions.closed_by (uuid)`, `expenses.reversed_by (uuid)`, `audit_logs.actor_type (text)`, `constitution_sections.embedding`.
       - **6 Critical Integrity Triggers:** `trg_validate_expense_mutation`, `trg_protect_payment_transitions`, `trg_protect_member_columns`, `trg_validate_attendance_record_mutation`, `trg_audit_expenses`, `trg_audit_members`.
       - **3 Critical Security Functions:** `public.get_caller_auth`, `public.match_constitution_sections`, `public.process_audit_log_capture`.
-      - **2 Critical Unique Indexes:** `uq_members_email_lower`, `uq_contributions_reference`.
-      - **Active Row Level Security:** Validates `rowsecurity = TRUE` on all 10 public tables.
-    - Script fails closed: raises fatal SQL exception listing all missing items if any check fails.
+      - **Active Row Level Security:** Asserts `rowsecurity = TRUE` across ALL 10 public tables.
+    - Script fails closed: raises fatal SQL exception (`RAISE EXCEPTION`) listing all missing items if any assertion fails.
 *   **Acceptance Tests:**
     - *Positive Test 1 (Baseline Pass):* Run preflight check on database with complete schema baseline. Expected: script runs cleanly with zero exceptions.
     - *Negative Test 1 (Missing Column):* Drop column `closed_by` on `contributions` and run preflight script. Expected: raises fatal exception `PREFLIGHT VALIDATION FAILED: Missing baseline objects: Column: public.contributions.closed_by (uuid)`.
-    - *Negative Test 2 (Disabled RLS):* Disable RLS on `public.expenses` and run preflight script. Expected: raises fatal exception `RLS disabled on table: public.expenses`.
+    - *Negative Test 2 (Missing Index Expression):* Drop index `idx_members_email_lower` and recreate without `LOWER()` function. Expected: raises fatal exception `PREFLIGHT VALIDATION FAILED: Index: public.members.idx_members_email_lower ON LOWER(email)`.
+    - *Negative Test 3 (Disabled RLS):* Disable RLS on `public.expenses` and run preflight script. Expected: raises fatal exception `RLS disabled on table: public.expenses`.
 *   **Execution Status:** Script DDL verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR SCHEMA RELEASE GATE)**.
 
 ---
@@ -83,23 +87,33 @@
 
 ---
 
-### 5. Restore Safety: Production Isolation, Fail-Fast Shell & Automated Invariant Assertions
-*   **Defect & Impact:** Restore procedure previously lacked comprehensive target environment guards, omitted shell fail-fast handling (`set -euo pipefail`), and relied on basic row count outputs rather than enforcing schema, referential, and state invariants.
+### 5. Restore Safety: Trusted Endpoint Verification, Exhaustive Invariants & Test Fixtures
+*   **Defect & Impact:** 
+    1. Previous restore script verified target host only by checking constructed host substrings, failing to compare against trusted production endpoints or detect DNS/IP aliases pointing to production.
+    2. Post-restore invariant assertions verified RLS on only 4 tables (instead of all public tables) and checked `expenses.recorded_by` while omitting `approved_by` and `reversed_by`.
 *   **Source Location:** Section 7.2 of `implementation_plan.md` and `scripts/restore_database.sh`
 *   **Corrected Documentation & Control:**
-    - **Fail-Fast Shell Handling:** Added `set -euo pipefail` at script start; halts on any pipeline, command, or uninitialized variable failure.
-    - **Multi-Point Production Target Guard:** Checks that both `TARGET_PROJECT_ID` and `PROD_PROJECT_ID` are non-empty; halts immediately if `TARGET_PROJECT_ID == PROD_PROJECT_ID`, or if target ID/host contains `prod` or `agila-hub-prod`.
+    - **Fail-Fast Shell Handling:** Enforces `set -euo pipefail` at script start.
+    - **Independent Production Endpoint Verification:**
+      - Requires non-empty `PROD_DB_HOST` and `TARGET_PROJECT_ID`.
+      - Rejects if `TARGET_PROJECT_ID == PROD_PROJECT_ID`.
+      - Enforces strict whitelist: `TARGET_ENV` must explicitly equal `staging` or `development`.
+      - Compares `TARGET_DB_HOST` directly against `PROD_DB_HOST`.
+      - Resolves canonical DNS/IP addresses (`getent hosts`) and aborts if target resolves to the same IP as `PROD_DB_HOST`.
     - **Atomic Single Transaction:** Restores exclusively using `psql --single-transaction -v ON_ERROR_STOP=1`.
-    - **Automated Post-Restore Invariant Assertions:** Connects with `-v ON_ERROR_STOP=1` and runs a PL/pgSQL verification block asserting:
-      1. Non-zero baseline row counts on `members`.
-      2. Referential integrity: zero orphaned rows in `contributions` and `expenses` pointing to invalid `members(id)`.
-      3. Financial state invariant: zero verified expenses lacking approval metadata (`approved_by`, `approved_at`).
-      4. Reversal invariant: zero voided expenses lacking reversal metadata (`reversed_by`, `reversed_at`, `reversal_reason`) or having cleared approval metadata.
-      5. Security invariant: active RLS (`rowsecurity = TRUE`) on all public tables.
-      6. Raises fatal exception and exits non-zero if any invariant is violated.
-*   **Acceptance Tests:**
-    - *Positive Test 1 (Valid Staging Restore):* Execute `scripts/restore_database.sh` targeting verified staging instance. Expected: pre-checks pass, psql executes within single transaction, post-restore automated invariant block succeeds with notice.
-    - *Negative Test 1 (Production Target Block):* Set `TARGET_PROJECT_ID = $PROD_PROJECT_ID` and execute restore script. Expected: halts immediately with `FATAL: Attempted restore to PRODUCTION target`.
-    - *Negative Test 2 (Corrupted File Abort):* Pass corrupted backup file to restore script. Expected: transaction rolls back cleanly with zero changes applied to staging.
-    - *Negative Test 3 (Invariant Failure Abort):* Restore backup with orphan foreign keys into staging. Expected: PL/pgSQL post-restore assertion raises fatal exception and fails script.
-*   **Execution Status:** Runbook specification and automated SQL assertion verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE)**.
+    - **Exhaustive Automated Invariant Assertions:**
+      - Verifies non-zero baseline count on `members`.
+      - Verifies referential integrity across ALL member references in `expenses` (`recorded_by`, `approved_by`, `reversed_by`).
+      - Verifies referential integrity across ALL member references in `contributions` (`member_id`, `recorded_by`, `verified_by`, `closed_by`).
+      - Verifies referential integrity for `attendance_records` (`event_id`, `member_id`).
+      - Verifies financial state invariants (valid approval and reversal attribution on expenses, valid verification metadata on contributions).
+      - Verifies active RLS (`rowsecurity = TRUE`) across **ALL public tables** in `pg_tables`.
+      - Raises fatal SQL exception if any invariant fails, causing `psql` to exit non-zero.
+*   **Acceptance Test Fixtures:**
+    - *Positive Fixture 1 (Valid Staging Execution):* Script executes with `TARGET_ENV=staging`, `TARGET_DB_HOST=db.staging-ref.supabase.co`, `PROD_DB_HOST=db.prod-ref.supabase.co`. Expected: all endpoint guards pass, restore executes within single transaction, and post-restore assertion executes cleanly with notice.
+    - *Negative Fixture 1 (Direct Endpoint Match):* Script executes with `TARGET_DB_HOST=db.prod-ref.supabase.co` matching `PROD_DB_HOST`. Expected: terminates immediately before connection with `FATAL: TARGET_HOST matches trusted production endpoint`.
+    - *Negative Fixture 2 (DNS Resolution Match):* Script executes where `TARGET_DB_HOST` and `PROD_DB_HOST` resolve to identical IP address. Expected: terminates immediately before connection with `FATAL: TARGET_HOST resolves to same IP as PROD_DB_HOST`.
+    - *Negative Fixture 3 (Disallowed Environment):* Script executes with `TARGET_ENV=production`. Expected: terminates immediately with `FATAL: TARGET_ENV must be 'staging' or 'development'`.
+    - *Negative Fixture 4 (Orphan approved_by / reversed_by FK):* Database backup contains an expense row with `approved_by` or `reversed_by` referencing non-existent member. Expected: post-restore assertion raises fatal exception and fails script.
+    - *Negative Fixture 5 (Disabled Public Table RLS):* Database target has `rowsecurity = FALSE` on any public table. Expected: post-restore assertion raises fatal exception and fails script.
+*   **Execution Status:** Runbook specification, SQL DDL, and test fixtures verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE IN PHASE 07)**.

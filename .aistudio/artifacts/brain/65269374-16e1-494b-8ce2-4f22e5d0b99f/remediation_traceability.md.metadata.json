@@ -1,6 +1,6 @@
 {
-  "summary": "AGILA Hub Android — Phase 00 Remediation Traceability Matrix, Revision 3.7. Tracks all 5 targeted remediation items: audit payload category fix and regression test, exhaustive preflight schema assertions, expense attribution preservation, contribution verification attribution preservation, and hardened fail-fast restore script with automated invariant checks.",
-  "updatedAt": "2026-10-13T20:52:00.000000000Z",
+  "summary": "AGILA Hub Android — Phase 00 Remediation Traceability Matrix, Revision 3.8. Reconciles schema-aligned preflight index checks (idx_members_email_lower, uq_reference_payment), independent production endpoint verification against PROD_DB_HOST, and exhaustive post-restore assertions covering all member references and active RLS on all public tables.",
+  "updatedAt": "2026-10-13T21:07:00.000000000Z",
   "requestFeedback": false,
   "userFacing": true
 }
