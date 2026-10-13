@@ -1,6 +1,6 @@
 # AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan
-**Document Version:** Revision 3.6 (Final Targeted Correction Baseline)  
-**Status:** Completed Phase 00 Planning Specification  
+**Document Version:** Revision 3.7 (Final Implementation-Ready Baseline & Source Defect Remediation)  
+**Status:** Completed Phase 00 Planning Specification (Awaiting Stakeholder Approval)  
 **Target Platform:** Android (React Native + Expo SDK 52+ + TypeScript)  
 **Backend:** Supabase (PostgreSQL 16, GoTrue Auth, Storage, Edge Functions, pgvector)  
 **Web Admin:** React (Vite / Next.js) on Vercel *(Desktop Administration Only — NOT an Android Builder)*  
@@ -1311,7 +1311,7 @@ BEGIN
             v_safe_old := jsonb_build_object('id', v_raw_old->'id', 'category', v_raw_old->'category', 'amount', v_raw_old->'amount', 'description', v_raw_old->'description', 'status', v_raw_old->'status', 'recorded_by', v_raw_old->'recorded_by', 'approved_by', v_raw_old->'approved_by', 'approved_at', v_raw_old->'approved_at', 'reversed_by', v_raw_old->'reversed_by', 'reversed_at', v_raw_old->'reversed_at');
         END IF;
         IF v_raw_new IS NOT NULL THEN
-            v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'category', v_raw_old->'category', 'amount', v_raw_new->'amount', 'description', v_raw_new->'description', 'status', v_raw_new->'status', 'recorded_by', v_raw_new->'recorded_by', 'approved_by', v_raw_new->'approved_by', 'approved_at', v_raw_new->'approved_at', 'reversed_by', v_raw_new->'reversed_by', 'reversed_at', v_raw_new->'reversed_at');
+            v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'category', v_raw_new->'category', 'amount', v_raw_new->'amount', 'description', v_raw_new->'description', 'status', v_raw_new->'status', 'recorded_by', v_raw_new->'recorded_by', 'approved_by', v_raw_new->'approved_by', 'approved_at', v_raw_new->'approved_at', 'reversed_by', v_raw_new->'reversed_by', 'reversed_at', v_raw_new->'reversed_at');
         END IF;
 
     ELSIF TG_TABLE_NAME = 'announcements' THEN
@@ -1711,29 +1711,63 @@ USING (
 *   **RPO Reconciled Analysis:**
     *   **Supabase Pro / Team Tier (with PITR Add-On):** Continuous physical Write-Ahead Log (WAL) archiving with a **7-day retention window**. RPO is $\le 1\,\text{minute}$. **Meets the $\le 1\,\text{hour}$ RPO requirement.**
     *   **Supabase Free / Dev Tier:** Provides only automated daily logical backups. RPO is $\le 24\,\text{hours}$. **Fails the $\le 1\,\text{hour}$ RPO requirement.**
-*   **Restoration Safety Rules:**
-    1. **Production Overwrite Protection:** Script strictly compares target database host against production host. If host matches production, restore terminates immediately.
-    2. **Single Transaction Safety:** Restore runs with `--single-transaction` and `ON_ERROR_STOP=1`. If any error occurs, all changes roll back cleanly.
-    3. **Topological Order:** Data is inserted in strict topological dependency order (`members` -> `invitations`/`eagles_id_cards` -> `attendance_events` -> `attendance_records` -> `contributions` -> `expenses` -> `announcements` -> `audit_logs`). No unsafe trigger disabling is permitted.
-*   **Target-Compatible Restore Runbook:**
+*   **Restoration Safety & Invariant Rules:**
+    1. **Production Target Isolation Policy:** Script strictly checks both project ID and host string against production patterns (`PROD_PROJECT_ID`, `*agila-hub-prod*`, `*prod*`). Restoration to production via logical dump script is unconditionally blocked.
+    2. **Fail-Fast Shell Handling:** Bash script enforces `set -euo pipefail` to terminate immediately on command failure, uninitialized variables, or pipeline errors.
+    3. **Atomic Single-Transaction Safety:** Restore executes via `psql --single-transaction -v ON_ERROR_STOP=1`. If any error or constraint violation occurs during execution, PostgreSQL rolls back all changes atomically.
+    4. **Topological Order:** Data is inserted in strict topological dependency order (`members` -> `invitations`/`eagles_id_cards` -> `attendance_events` -> `attendance_records` -> `contributions` -> `expenses` -> `announcements` -> `audit_logs`). No unsafe session replication or trigger-disabling hacks are permitted.
+    5. **Automated Post-Restore Invariant Verification:** Rather than merely echoing row counts, an automated PL/pgSQL verification block asserts referential integrity (zero orphaned child rows), financial state invariants (valid approval and reversal attribution), and active RLS (`rowsecurity = TRUE`). Any failure aborts with an unhandled exception and non-zero exit code.
+*   **Target-Compatible Restore Runbook (`scripts/restore_database.sh`):**
 ```bash
-# 1. Target Environment Check
-if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ]; then
-    echo "FATAL: Attempted restore to PRODUCTION database. Aborted." >&2
+#!/usr/bin/env bash
+# AGILA Hub — Transaction-Safe Restore Runbook (Staging / Recovery Testing Only)
+set -euo pipefail
+
+# 1. Enforce Fail-Fast Guard & Target Environment Policy
+if [ -z "${TARGET_PROJECT_ID:-}" ]; then
+    echo "FATAL: TARGET_PROJECT_ID is unset. Aborted." >&2
+    exit 1
+fi
+
+if [ -z "${PROD_PROJECT_ID:-}" ]; then
+    echo "FATAL: PROD_PROJECT_ID is unset. Cannot verify production isolation guard." >&2
+    exit 1
+fi
+
+# Hard block: Never permit restoration to production via this script
+if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ] || [[ "$TARGET_PROJECT_ID" =~ (prod|production) ]]; then
+    echo "FATAL: Attempted restore to PRODUCTION target '$TARGET_PROJECT_ID'. Aborted by safety policy." >&2
+    exit 1
+fi
+
+# Verify target host format matches expected non-production pattern
+TARGET_HOST="db.${TARGET_PROJECT_ID}.supabase.co"
+if [[ "$TARGET_HOST" =~ agila-hub-prod ]]; then
+    echo "FATAL: Target host '$TARGET_HOST' resolves to production cluster. Aborted." >&2
     exit 1
 fi
 
 # 2. Validate Explicit Single Backup File & Checksum
-BACKUP_FILE="./backups/prod_backup_20261013_120000.sql"
+BACKUP_FILE="${1:-./backups/backup_staging_test.sql}"
 if [ ! -s "$BACKUP_FILE" ]; then
-    echo "FATAL: Backup file does not exist or is empty." >&2
+    echo "FATAL: Backup file '$BACKUP_FILE' does not exist or is empty." >&2
     exit 1
 fi
-sha256sum -c "${BACKUP_FILE}.sha256" || exit 1
 
-# 3. Transaction-Safe Data-Only Restore
-PGPASSWORD="$TARGET_DB_PASSWORD" psql \
-  -h db.$TARGET_PROJECT_ID.supabase.co \
+if [ ! -f "${BACKUP_FILE}.sha256" ]; then
+    echo "FATAL: Checksum file '${BACKUP_FILE}.sha256' is missing." >&2
+    exit 1
+fi
+
+sha256sum -c "${BACKUP_FILE}.sha256" || {
+    echo "FATAL: Checksum validation failed for '$BACKUP_FILE'." >&2
+    exit 1
+}
+
+# 3. Transaction-Safe Data Restore with Fail-Fast Execution
+echo "Starting transaction-safe restore into target: $TARGET_PROJECT_ID..."
+PGPASSWORD="${TARGET_DB_PASSWORD:?Target DB password required}" psql \
+  -h "$TARGET_HOST" \
   -p 5432 \
   -d postgres \
   -U postgres \
@@ -1741,13 +1775,77 @@ PGPASSWORD="$TARGET_DB_PASSWORD" psql \
   -v ON_ERROR_STOP=1 \
   -f "$BACKUP_FILE"
 
-# 4. Post-Restore Integrity Verification
+# 4. Meaningful Automated Integrity Verification
+echo "Executing automated post-restore integrity assertions..."
 PGPASSWORD="$TARGET_DB_PASSWORD" psql \
-  -h db.$TARGET_PROJECT_ID.supabase.co \
+  -h "$TARGET_HOST" \
   -p 5432 \
   -d postgres \
   -U postgres \
-  -c "SELECT count(*) FROM public.members; SELECT count(*) FROM public.contributions;"
+  -v ON_ERROR_STOP=1 \
+  << 'EOF'
+DO $$
+DECLARE
+    v_member_count INT;
+    v_orphan_contributions INT;
+    v_orphan_expenses INT;
+    v_invalid_verified_expenses INT;
+    v_invalid_voided_expenses INT;
+    v_disabled_rls INT;
+BEGIN
+    -- Check 1: Non-zero baseline data check
+    SELECT count(*) INTO v_member_count FROM public.members;
+    IF v_member_count = 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE INTEGRITY FAILURE: members table is empty';
+    END IF;
+
+    -- Check 2: Referential integrity (no orphan contributions)
+    SELECT count(*) INTO v_orphan_contributions
+    FROM public.contributions c
+    WHERE NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id = c.member_id);
+    IF v_orphan_contributions > 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE INTEGRITY FAILURE: Found % orphan contribution records', v_orphan_contributions;
+    END IF;
+
+    -- Check 3: Referential integrity (no orphan expenses)
+    SELECT count(*) INTO v_orphan_expenses
+    FROM public.expenses e
+    WHERE NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id = e.recorded_by);
+    IF v_orphan_expenses > 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE INTEGRITY FAILURE: Found % orphan expense records', v_orphan_expenses;
+    END IF;
+
+    -- Check 4: Financial state invariant - verified expenses must have approved_by & approved_at
+    SELECT count(*) INTO v_invalid_verified_expenses
+    FROM public.expenses
+    WHERE status = 'verified' AND (approved_by IS NULL OR approved_at IS NULL);
+    IF v_invalid_verified_expenses > 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE INTEGRITY FAILURE: Found % verified expenses lacking approval metadata', v_invalid_verified_expenses;
+    END IF;
+
+    -- Check 5: Financial state invariant - voided expenses that were previously approved must preserve approved_by and have reversed_by
+    SELECT count(*) INTO v_invalid_voided_expenses
+    FROM public.expenses
+    WHERE status = 'voided' AND approved_by IS NOT NULL AND (reversed_by IS NULL OR reversed_at IS NULL OR reversal_reason IS NULL);
+    IF v_invalid_voided_expenses > 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE INTEGRITY FAILURE: Found % reversed expenses lacking reversal metadata', v_invalid_voided_expenses;
+    END IF;
+
+    -- Check 6: Security invariant - all public tables must maintain active RLS
+    SELECT count(*) INTO v_disabled_rls
+    FROM pg_tables
+    WHERE schemaname = 'public' 
+      AND tablename IN ('members', 'contributions', 'expenses', 'audit_logs')
+      AND rowsecurity = FALSE;
+    IF v_disabled_rls > 0 THEN
+        RAISE EXCEPTION 'POST-RESTORE INTEGRITY FAILURE: Core public tables have disabled RLS';
+    END IF;
+
+    RAISE NOTICE 'POST-RESTORE INTEGRITY PASSED: All referential, state, and security invariants validated successfully.';
+END $$;
+EOF
+
+echo "Restore and post-restore integrity assertions completed successfully."
 ```
 
 ---
@@ -1755,32 +1853,36 @@ PGPASSWORD="$TARGET_DB_PASSWORD" psql \
 ## 8. Migration Safety, Comprehensive Preflight Validation & UTC Timestamps
 
 ### 8.1 Machine-Verifiable Preflight Script (`scripts/preflight_schema_check.sql`)
+The preflight script performs comprehensive, machine-verifiable assertions across the complete schema baseline. If any extension, table, critical column, constraint, index, function, trigger, or RLS setting is missing or invalid, the script aborts immediately with a descriptive fatal SQL exception (`RAISE EXCEPTION`).
+
 ```sql
 DO $$
 DECLARE
     v_missing_items TEXT[] := ARRAY[]::TEXT[];
+    v_expected_table TEXT;
+    v_expected_tables TEXT[] := ARRAY[
+        'members', 'member_invitations', 'eagles_id_cards', 'announcements', 
+        'attendance_events', 'attendance_records', 'contributions', 'expenses', 
+        'constitution_sections', 'audit_logs'
+    ];
 BEGIN
-    -- 1. Check Extensions
+    -- 1. Check Required Extensions
     IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
         v_missing_items := array_append(v_missing_items, 'Extension: vector');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto') THEN
         v_missing_items := array_append(v_missing_items, 'Extension: pgcrypto');
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp') THEN
+        v_missing_items := array_append(v_missing_items, 'Extension: uuid-ossp');
+    END IF;
 
-    -- 2. Check Core Tables
-    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'members') THEN
-        v_missing_items := array_append(v_missing_items, 'Table: public.members');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'contributions') THEN
-        v_missing_items := array_append(v_missing_items, 'Table: public.contributions');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'expenses') THEN
-        v_missing_items := array_append(v_missing_items, 'Table: public.expenses');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_logs') THEN
-        v_missing_items := array_append(v_missing_items, 'Table: public.audit_logs');
-    END IF;
+    -- 2. Check All 10 Baseline Core Tables
+    FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
+        IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = v_expected_table) THEN
+            v_missing_items := array_append(v_missing_items, 'Table: public.' || v_expected_table);
+        END IF;
+    END LOOP;
 
     -- 3. Check Critical Columns, Types & Definitions
     IF NOT EXISTS (
@@ -1801,8 +1903,20 @@ BEGIN
     ) THEN
         v_missing_items := array_append(v_missing_items, 'Column: public.expenses.reversed_by (uuid)');
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'audit_logs' AND column_name = 'actor_type' AND data_type = 'text'
+    ) THEN
+        v_missing_items := array_append(v_missing_items, 'Column: public.audit_logs.actor_type (text)');
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'constitution_sections' AND column_name = 'embedding'
+    ) THEN
+        v_missing_items := array_append(v_missing_items, 'Column: public.constitution_sections.embedding');
+    END IF;
 
-    -- 4. Check Critical Triggers
+    -- 4. Check Critical Integrity Triggers
     IF NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_schema = 'public' AND trigger_name = 'trg_validate_expense_mutation') THEN
         v_missing_items := array_append(v_missing_items, 'Trigger: trg_validate_expense_mutation');
     END IF;
@@ -1815,14 +1929,41 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_schema = 'public' AND trigger_name = 'trg_validate_attendance_record_mutation') THEN
         v_missing_items := array_append(v_missing_items, 'Trigger: trg_validate_attendance_record_mutation');
     END IF;
-
-    -- 5. Check RLS Active on Core Tables
-    IF EXISTS (
-        SELECT tablename FROM pg_tables 
-        WHERE schemaname = 'public' AND tablename IN ('members', 'contributions', 'expenses', 'audit_logs') AND rowsecurity = FALSE
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'RLS disabled on core public tables');
+    IF NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_schema = 'public' AND trigger_name = 'trg_audit_expenses') THEN
+        v_missing_items := array_append(v_missing_items, 'Trigger: trg_audit_expenses');
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_schema = 'public' AND trigger_name = 'trg_audit_members') THEN
+        v_missing_items := array_append(v_missing_items, 'Trigger: trg_audit_members');
+    END IF;
+
+    -- 5. Check Critical Security Functions
+    IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = 'get_caller_auth') THEN
+        v_missing_items := array_append(v_missing_items, 'Function: public.get_caller_auth');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = 'match_constitution_sections') THEN
+        v_missing_items := array_append(v_missing_items, 'Function: public.match_constitution_sections');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = 'process_audit_log_capture') THEN
+        v_missing_items := array_append(v_missing_items, 'Function: public.process_audit_log_capture');
+    END IF;
+
+    -- 6. Check Critical Indexes
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'uq_members_email_lower') THEN
+        v_missing_items := array_append(v_missing_items, 'Index: public.uq_members_email_lower');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'uq_contributions_reference') THEN
+        v_missing_items := array_append(v_missing_items, 'Index: public.uq_contributions_reference');
+    END IF;
+
+    -- 7. Check Active Row Level Security on ALL 10 Public Tables
+    FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
+        IF EXISTS (
+            SELECT 1 FROM pg_tables 
+            WHERE schemaname = 'public' AND tablename = v_expected_table AND rowsecurity = FALSE
+        ) THEN
+            v_missing_items := array_append(v_missing_items, 'RLS disabled on table: public.' || v_expected_table);
+        END IF;
+    END LOOP;
 
     IF array_length(v_missing_items, 1) > 0 THEN
         RAISE EXCEPTION 'PREFLIGHT VALIDATION FAILED: Missing baseline objects: %', array_to_string(v_missing_items, ', ');
@@ -1836,16 +1977,16 @@ END $$;
 
 > **Note on Evidence:** All tests listed below are **PLANNED test specifications** to be executed during their designated implementation phase release gates. No test is claimed as already executed in Phase 00.
 
-| ID | Issue / Requirement | Enforced Architectural Control | Migration Location | Explicit Planned Test Procedures (Positive & Negative) | Release Gate |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **P0-01** | Expense approval & reversal integrity | Separate `approved_by/at` and `reversed_by/at`; original approval preserved on reversal | `006_financial_records.sql` | **Pos:** Financial Officer B approves expense; Officer B reverses expense with reason; verify `approved_by` preserved and `reversed_by` set.<br>**Neg:** Self-approval by recorder; modify approved amount; clear approval metadata without status change. | Financial Gate |
-| **P0-02** | Contribution verification integrity | Separate `verified_by/at` and `closed_by/at`; original verification preserved on void/adjust | `006_financial_records.sql` | **Pos:** Verify contribution; void verified contribution; verify `verified_by` preserved and `closed_by` set.<br>**Neg:** Spoof `verified_by`; modify metadata without status transition; transition from voided. | Financial Gate |
-| **P0-03** | Member identity protection | Trigger blocking self-service edits to names, `auth_user_id`, chapter, role, status | `002_members_and_directory.sql` | **Pos:** Member updates own nickname and avatar.<br>**Neg:** Member updates legal name, `auth_user_id`, or `club_chapter`; verify SQL exception. | Privilege Gate |
-| **P1-01** | Audit privacy & actor attribution | Strict per-table allowlist with zero fallback leakage; trusted server actor attribution | `008_audit_logs_and_triggers.sql` | **Pos:** Member mutation records allowlisted attributes only.<br>**Neg:** Check audit log on ID cards (paths absent); check invitations (`token_hash` absent); check unallowlisted column exclusion. | Audit Gate |
-| **P1-02** | Attendance verification integrity | Server-controlled trigger binds `verified_by := v_caller.member_id` | `005_announcements_and_attendance.sql` | **Pos:** Officer marks attendance; verified_by set to Officer ID.<br>**Neg:** Officer passes third-party UUID as verified_by; verify server overrides with caller ID. | Attendance Gate |
-| **P1-03** | Validated backup/restore runbook | Production overwrite block, single transaction, topological FK order, verification query | Section 7.2 of plan | **Pos:** Execute psql restore on verified backup targeting staging.<br>**Neg:** Pass production host or empty file; verify script halts immediately. | Recovery Gate |
-| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions, tables, columns, triggers, RLS | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline.<br>**Neg:** Drop trigger or column; verify script raises fatal validation exception. | Schema Gate |
-| **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate |
+| ID | Issue / Requirement | Enforced Architectural Control | Migration Location | Explicit Planned Test Procedures (Positive & Negative) | Release Gate | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| **P0-01** | Expense approval & reversal integrity | Separate `approved_by/at` and `reversed_by/at`; original approval preserved on reversal | `006_financial_records.sql` | **Pos:** Financial Officer B approves expense; Officer B reverses expense with reason; verify `approved_by` preserved and `reversed_by` set.<br>**Neg:** Self-approval by recorder; modify approved amount; clear approval metadata without status change. | Financial Gate | **NOT EXECUTED** *(Scheduled for Financial Gate)* |
+| **P0-02** | Contribution verification integrity | Separate `verified_by/at` and `closed_by/at`; original verification preserved on void/adjust | `006_financial_records.sql` | **Pos:** Verify contribution; void verified contribution; verify `verified_by` preserved and `closed_by` set.<br>**Neg:** Spoof `verified_by`; modify metadata without status transition; transition from voided. | Financial Gate | **NOT EXECUTED** *(Scheduled for Financial Gate)* |
+| **P0-03** | Member identity protection | Trigger blocking self-service edits to names, `auth_user_id`, chapter, role, status | `002_members_and_directory.sql` | **Pos:** Member updates own nickname and avatar.<br>**Neg:** Member updates legal name, `auth_user_id`, or `club_chapter`; verify SQL exception. | Privilege Gate | **NOT EXECUTED** *(Scheduled for Privilege Gate)* |
+| **P1-01** | Audit privacy & actor attribution | Strict per-table allowlist with zero fallback leakage; trusted server actor attribution; regression fix on `expenses.new_data.category` | `008_audit_logs_and_triggers.sql` | **Pos 1:** Member mutation records allowlisted attributes only.<br>**Pos 2 (Regression Test):** Insert expense record (`category = 'venue_rental'`); verify audit log `new_data->>'category' = 'venue_rental'` is captured correctly and non-null.<br>**Neg:** Check audit log on ID cards (paths absent); check invitations (`token_hash` absent); check unallowlisted column exclusion. | Audit Gate | **NOT EXECUTED** *(Scheduled for Audit Gate)* |
+| **P1-02** | Attendance verification integrity | Server-controlled trigger binds `verified_by := v_caller.member_id` | `005_announcements_and_attendance.sql` | **Pos:** Officer marks attendance; verified_by set to Officer ID.<br>**Neg:** Officer passes third-party UUID as verified_by; verify server overrides with caller ID. | Attendance Gate | **NOT EXECUTED** *(Scheduled for Attendance Gate)* |
+| **P1-03** | Validated backup/restore runbook & automated assertions | Multi-point production guard, fail-fast `set -euo pipefail`, single transaction, topological FK order, automated PL/pgSQL invariant assertions | Section 7.2 of plan | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity, financial invariants, and active RLS.<br>**Neg 1:** Pass production host or project ID; verify script halts immediately with fatal error.<br>**Neg 2:** Pass corrupted archive; verify clean atomic rollback. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
+| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (10), columns/types, triggers, functions, indexes, RLS | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline.<br>**Neg 1:** Drop table or column; verify script raises fatal validation exception.<br>**Neg 2:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
+| **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate | **NOT EXECUTED** *(Scheduled for RAG Gate)* |
 
 ---
 

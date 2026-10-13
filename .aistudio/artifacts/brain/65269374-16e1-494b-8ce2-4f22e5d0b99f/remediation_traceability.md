@@ -1,43 +1,49 @@
-# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.6)
+# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.7)
 **Document:** Final Phase 00 Remediation Traceability (`remediation_traceability.md`)  
-**Status:** Implementation-Ready Planning Traceability  
+**Status:** Implementation-Ready Planning Traceability (Awaiting Stakeholder Approval)  
 **Scope:** Reconciled against Migrations 001 through 009, Preflight Checks, and Operational Procedures
 
 ---
 
 ## 1. Traceability Register: Targeted Remediation Findings
 
-### 1. Audit Privacy: Strict Allowlist & Zero Fallback Leakage
-*   **Defect & Impact:** Previous revision fell back to copying raw payloads minus token/phone when a table was not recognized, risking exposure of storage paths, emails, and private data.
-*   **Source Location:** `supabase/migrations/20261013000008_audit_logs_and_triggers.sql`
+### 1. Audit Privacy & Expense Payload Integrity
+*   **Defect & Impact:** 
+    1. Previous revision fell back to copying raw payloads minus token/phone when a table was not recognized, risking exposure of storage paths, emails, and private data.
+    2. In `expenses` audit logging, `v_safe_new` erroneously read `category` from `v_raw_old->'category'` instead of `v_raw_new->'category'`, causing `new_data.category` to evaluate to `NULL` on INSERTs and retain stale categories on UPDATEs.
+*   **Source Location:** `supabase/migrations/20261013000008_audit_logs_and_triggers.sql` (in `public.process_audit_log_capture()`)
 *   **Corrected SQL & Control:**
-    - In `public.process_audit_log_capture()`: Replaced generic fallback with strict per-table allowlists for all 8 audited tables (`members`, `eagles_id_cards`, `member_invitations`, `contributions`, `expenses`, `announcements`, `attendance_events`, `attendance_records`).
-    - The fallback branch strictly records `jsonb_build_object('id', v_record_id)` with zero raw payload fields.
+    - Corrected `expenses` audit mapping: `v_safe_new := jsonb_build_object(..., 'category', v_raw_new->'category', ...)`.
+    - Replaced generic fallback with strict per-table allowlists for all 8 audited tables (`members`, `eagles_id_cards`, `member_invitations`, `contributions`, `expenses`, `announcements`, `attendance_events`, `attendance_records`).
+    - The unmapped fallback branch strictly records `jsonb_build_object('id', v_record_id)` with zero raw payload fields.
     - Added `actor_type` column distinguishing `'authenticated_member'`, `'service_role'`, and `'system'`. Actor attribution is derived strictly from server context (`auth.uid()`), ignoring any client payload.
 *   **Acceptance Tests:**
     - *Positive Test 1 (Allowlisted Field Capture):* Member updates nickname. Expected: audit row created with `actor_type = 'authenticated_member'`; `new_data` contains only allowlisted keys (`id`, `nickname`, `role`, `status`, `club_chapter`, `updated_at`).
     - *Positive Test 2 (Service-Role Attribution):* Backend worker executes mutation via service role. Expected: audit row created with `actor_type = 'service_role'` and `actor_id IS NULL`.
+    - *Positive Test 3 (Expense Category Regression Test):* Financial officer inserts expense (`category = 'venue_rental'`). Expected: audit row created with `new_data->>'category' = 'venue_rental'` (non-null) and `old_data IS NULL`. When updated to `'equipment_rental'`, verify `old_data->>'category' = 'venue_rental'` and `new_data->>'category' = 'equipment_rental'`.
     - *Negative Test 1 (Storage Path Exclusion):* Member uploads Eagles ID card. Expected: audit log captures status change; `front_storage_path` and `back_storage_path` are completely excluded from `new_data`.
     - *Negative Test 2 (Token Hash Exclusion):* Admin generates invitation. Expected: audit log captures invitation creation; `token_hash` is completely excluded from `new_data`.
 *   **Execution Status:** Specification and SQL DDL verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR AUDIT RELEASE GATE)**.
 
 ---
 
-### 2. Preflight Completeness: Comprehensive Baseline & Fixture Checks
-*   **Defect & Impact:** Previous preflight script checked only object names and missed validating columns, data types, triggers, and RLS configurations, failing to detect schema drift.
+### 2. Preflight Completeness: Exhaustive Baseline Schema Verification
+*   **Defect & Impact:** Previous preflight script checked only object presence names and missed validating columns, data types, triggers, and RLS configurations, failing to detect schema drift.
 *   **Source Location:** Section 8.1 of `implementation_plan.md` and `scripts/preflight_schema_check.sql`
 *   **Corrected SQL & Control:**
     - Expanded `preflight_schema_check.sql` to systematically inspect:
-      - Extensions: `uuid-ossp`, `pgcrypto`, `vector`.
-      - Core tables: `members`, `contributions`, `expenses`, `audit_logs`, `eagles_id_cards`, `announcements`, `attendance_events`, `attendance_records`.
-      - Critical columns & types: `members.auth_user_id (uuid)`, `contributions.closed_by (uuid)`, `expenses.reversed_by (uuid)`.
-      - Critical triggers: `trg_validate_expense_mutation`, `trg_protect_payment_transitions`, `trg_protect_member_columns`, `trg_validate_attendance_record_mutation`.
-      - RLS status: validates `rowsecurity = TRUE` on all core public tables.
+      - **3 Required Extensions:** `uuid-ossp`, `pgcrypto`, `vector`.
+      - **All 10 Core Baseline Tables:** `members`, `member_invitations`, `eagles_id_cards`, `announcements`, `attendance_events`, `attendance_records`, `contributions`, `expenses`, `constitution_sections`, `audit_logs`.
+      - **Critical Columns & Types:** `members.auth_user_id (uuid)`, `contributions.closed_by (uuid)`, `expenses.reversed_by (uuid)`, `audit_logs.actor_type (text)`, `constitution_sections.embedding`.
+      - **6 Critical Integrity Triggers:** `trg_validate_expense_mutation`, `trg_protect_payment_transitions`, `trg_protect_member_columns`, `trg_validate_attendance_record_mutation`, `trg_audit_expenses`, `trg_audit_members`.
+      - **3 Critical Security Functions:** `public.get_caller_auth`, `public.match_constitution_sections`, `public.process_audit_log_capture`.
+      - **2 Critical Unique Indexes:** `uq_members_email_lower`, `uq_contributions_reference`.
+      - **Active Row Level Security:** Validates `rowsecurity = TRUE` on all 10 public tables.
     - Script fails closed: raises fatal SQL exception listing all missing items if any check fails.
 *   **Acceptance Tests:**
     - *Positive Test 1 (Baseline Pass):* Run preflight check on database with complete schema baseline. Expected: script runs cleanly with zero exceptions.
     - *Negative Test 1 (Missing Column):* Drop column `closed_by` on `contributions` and run preflight script. Expected: raises fatal exception `PREFLIGHT VALIDATION FAILED: Missing baseline objects: Column: public.contributions.closed_by (uuid)`.
-    - *Negative Test 2 (Disabled RLS):* Disable RLS on `public.expenses` and run preflight script. Expected: raises fatal exception `RLS disabled on core public tables`.
+    - *Negative Test 2 (Disabled RLS):* Disable RLS on `public.expenses` and run preflight script. Expected: raises fatal exception `RLS disabled on table: public.expenses`.
 *   **Execution Status:** Script DDL verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR SCHEMA RELEASE GATE)**.
 
 ---
@@ -77,17 +83,23 @@
 
 ---
 
-### 5. Restore Safety: Production Isolation, Single Transaction & Topological Order
-*   **Defect & Impact:** Restore procedure previously relied on session replication role manipulation without safety checks and lacked guards preventing accidental restore into production.
-*   **Source Location:** Section 7.2 of `implementation_plan.md`
+### 5. Restore Safety: Production Isolation, Fail-Fast Shell & Automated Invariant Assertions
+*   **Defect & Impact:** Restore procedure previously lacked comprehensive target environment guards, omitted shell fail-fast handling (`set -euo pipefail`), and relied on basic row count outputs rather than enforcing schema, referential, and state invariants.
+*   **Source Location:** Section 7.2 of `implementation_plan.md` and `scripts/restore_database.sh`
 *   **Corrected Documentation & Control:**
-    - Added target environment safety check: script halts immediately if target project ID matches production.
-    - Removed unsafe global trigger disabling. Uses standard PostgreSQL transactional restore with `--single-transaction` and `ON_ERROR_STOP=1`.
-    - Documented topological dependency ordering: `members` -> `invitations`/`eagles_id_cards` -> `attendance_events` -> `attendance_records` -> `contributions` -> `expenses` -> `announcements` -> `audit_logs`.
-    - Documented automated post-restore row count and integrity verification queries.
-    - Explicitly distinguished point-in-time recovery (WAL streaming on Supabase Pro) from logical dump restoration.
+    - **Fail-Fast Shell Handling:** Added `set -euo pipefail` at script start; halts on any pipeline, command, or uninitialized variable failure.
+    - **Multi-Point Production Target Guard:** Checks that both `TARGET_PROJECT_ID` and `PROD_PROJECT_ID` are non-empty; halts immediately if `TARGET_PROJECT_ID == PROD_PROJECT_ID`, or if target ID/host contains `prod` or `agila-hub-prod`.
+    - **Atomic Single Transaction:** Restores exclusively using `psql --single-transaction -v ON_ERROR_STOP=1`.
+    - **Automated Post-Restore Invariant Assertions:** Connects with `-v ON_ERROR_STOP=1` and runs a PL/pgSQL verification block asserting:
+      1. Non-zero baseline row counts on `members`.
+      2. Referential integrity: zero orphaned rows in `contributions` and `expenses` pointing to invalid `members(id)`.
+      3. Financial state invariant: zero verified expenses lacking approval metadata (`approved_by`, `approved_at`).
+      4. Reversal invariant: zero voided expenses lacking reversal metadata (`reversed_by`, `reversed_at`, `reversal_reason`) or having cleared approval metadata.
+      5. Security invariant: active RLS (`rowsecurity = TRUE`) on all public tables.
+      6. Raises fatal exception and exits non-zero if any invariant is violated.
 *   **Acceptance Tests:**
-    - *Positive Test 1 (Valid Staging Restore):* Execute restore script targeting verified staging instance. Expected: pre-checks pass, psql executes within single transaction, post-restore query verifies matching counts.
-    - *Negative Test 1 (Production Target Block):* Set `TARGET_PROJECT_ID = $PROD_PROJECT_ID` and execute restore script. Expected: halts immediately with `FATAL: Attempted restore to PRODUCTION database`.
+    - *Positive Test 1 (Valid Staging Restore):* Execute `scripts/restore_database.sh` targeting verified staging instance. Expected: pre-checks pass, psql executes within single transaction, post-restore automated invariant block succeeds with notice.
+    - *Negative Test 1 (Production Target Block):* Set `TARGET_PROJECT_ID = $PROD_PROJECT_ID` and execute restore script. Expected: halts immediately with `FATAL: Attempted restore to PRODUCTION target`.
     - *Negative Test 2 (Corrupted File Abort):* Pass corrupted backup file to restore script. Expected: transaction rolls back cleanly with zero changes applied to staging.
-*   **Execution Status:** Runbook specification verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE)**.
+    - *Negative Test 3 (Invariant Failure Abort):* Restore backup with orphan foreign keys into staging. Expected: PL/pgSQL post-restore assertion raises fatal exception and fails script.
+*   **Execution Status:** Runbook specification and automated SQL assertion verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE)**.

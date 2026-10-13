@@ -1,5 +1,6 @@
 {
-  "summary": "Updated Remediation Traceability Matrix for Revision 3.6 mapping all findings to exact source locations, corrected SQL, positive/negative acceptance tests, and honest execution status.",
-  "updatedAt": "2026-10-13T20:31:30.004118605Z",
+  "summary": "AGILA Hub Android — Phase 00 Remediation Traceability Matrix, Revision 3.7. Tracks all 5 targeted remediation items: audit payload category fix and regression test, exhaustive preflight schema assertions, expense attribution preservation, contribution verification attribution preservation, and hardened fail-fast restore script with automated invariant checks.",
+  "updatedAt": "2026-10-13T20:52:00.000000000Z",
+  "requestFeedback": false,
   "userFacing": true
 }

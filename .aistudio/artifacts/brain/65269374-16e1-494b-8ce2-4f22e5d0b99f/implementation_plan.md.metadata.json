@@ -1,6 +1,6 @@
 {
-  "summary": "AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan, Revision 3.6 (Final Targeted Correction Pass). Resolves all 5 outstanding findings: strict per-table audit allowlists with zero fallback leakage, expanded preflight schema check validating definitions and constraints, preservation of original approved_by/at during expense reversals via separate reversed_by/at fields, preservation of original verified_by/at during contribution voiding/adjustment via separate closed_by/at fields, and hardened, production-isolated restore runbook with topological FK ordering and explicit safety guards.",
-  "updatedAt": "2026-10-13T20:30:57.222307150Z",
+  "summary": "AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan, Revision 3.7 (Final Implementation-Ready Baseline & Source Defect Remediation). Resolves all 4 required corrections: fixes expenses.new_data.category audit source bug and adds regression test, completes machine-verifiable preflight assertions across all 10 core tables and constraints, aligns restore script safeguards with production-target policy using set -euo pipefail and automated invariant checks, and explicitly stamps all unexecuted runtime tests and recovery drills as NOT EXECUTED until their scheduled phase release gates.",
+  "updatedAt": "2026-10-13T20:52:00.000000000Z",
   "requestFeedback": true,
   "userFacing": true
 }
