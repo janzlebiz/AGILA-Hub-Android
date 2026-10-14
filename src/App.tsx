@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Shield,
   Database,
@@ -14,41 +14,234 @@ import {
   Lock,
   ChevronRight,
   Sparkles,
-  Download,
   Search,
-  ExternalLink,
   Smartphone,
   Eye,
   KeyRound,
-  RefreshCw
+  RefreshCw,
+  Copy,
+  Check,
+  Filter,
+  ListChecks
 } from 'lucide-react';
+import {
+  phase01TestResults,
+  phase01Migrations,
+  preflightSqlContent,
+  restoreScriptContent,
+  TestCase
+} from './data/phase01Data';
 
 interface TabItem {
   id: string;
   label: string;
   icon: React.ElementType;
+  badge?: string;
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'remediations' | 'matrix' | 'migrations' | 'preflight' | 'restore' | 'design'>('overview');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMigration, setSelectedMigration] = useState<number>(8);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'migrations' | 'matrix' | 'remediations' | 'preflight' | 'restore' | 'design'>('overview');
+  const [testSearch, setTestSearch] = useState('');
+  const [selectedSuite, setSelectedSuite] = useState<string>('ALL');
+  const [selectedMigrationNum, setSelectedMigrationNum] = useState<number>(1);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const handleCopy = (code: string, id: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCode(id);
-    setTimeout(() => setCopiedCode(null), 2000);
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const tabs: TabItem[] = [
     { id: 'overview', label: 'Executive Overview', icon: Layers },
-    { id: 'remediations', label: 'Remediations (3.11)', icon: Shield },
+    { id: 'tests', label: 'Automated Tests', icon: ListChecks, badge: '59 PASS' },
+    { id: 'migrations', label: 'SQL Migrations (001-009)', icon: Database, badge: '9 Files' },
     { id: 'matrix', label: 'Verification Matrix', icon: FileCheck },
-    { id: 'migrations', label: 'SQL Migrations (001-009)', icon: Database },
+    { id: 'remediations', label: 'Remediations (REM-01..05)', icon: Shield },
     { id: 'preflight', label: 'Preflight Script', icon: Terminal },
     { id: 'restore', label: 'Restore Runbook', icon: RefreshCw },
     { id: 'design', label: 'Liquid Glass Tokens', icon: Smartphone }
+  ];
+
+  // Test suites list
+  const testSuites = useMemo(() => {
+    const suites = Array.from(new Set(phase01TestResults.map((t) => t.suite)));
+    return ['ALL', ...suites];
+  }, []);
+
+  // Filtered tests
+  const filteredTests = useMemo(() => {
+    return phase01TestResults.filter((t) => {
+      const matchesSuite = selectedSuite === 'ALL' || t.suite === selectedSuite;
+      const query = testSearch.toLowerCase().trim();
+      const matchesSearch =
+        query === '' ||
+        t.id.toLowerCase().includes(query) ||
+        t.name.toLowerCase().includes(query) ||
+        t.evidence.toLowerCase().includes(query) ||
+        t.suite.toLowerCase().includes(query);
+      return matchesSuite && matchesSearch;
+    });
+  }, [selectedSuite, testSearch]);
+
+  const selectedMigration = useMemo(() => {
+    return phase01Migrations.find((m) => m.num === selectedMigrationNum) || phase01Migrations[0];
+  }, [selectedMigrationNum]);
+
+  const matrixItems = [
+    {
+      id: 'P1-DEL-01',
+      requirement: '9 SQL Migrations Materialized on Disk',
+      target: 'supabase/migrations/001-009',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Schema Gate',
+      notes: 'All 9 files written (63,972 bytes); validated by MIG-INV-01 & MIG-FILE-01..09'
+    },
+    {
+      id: 'P1-DEL-02',
+      requirement: 'Machine-Verifiable Preflight Script',
+      target: 'scripts/preflight_schema_check.sql',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Schema Gate',
+      notes: 'Validates 10 tables, 3 extensions, columns, triggers, functions, unique/HNSW indexes, RLS'
+    },
+    {
+      id: 'P1-DEL-03',
+      requirement: 'Hardened Database Restore Runbook',
+      target: 'scripts/restore_database.sh',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Recovery Gate',
+      notes: 'set -euo pipefail, explicit TARGET_ENV, project mapping, fail-closed DNS, single transaction'
+    },
+    {
+      id: 'P1-TEST-01',
+      requirement: 'Phase 01 Automated Test Suite',
+      target: 'scripts/verify_phase01.ts (npm test)',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'CI/CD Gate',
+      notes: '59 automated assertions executed across 5 suites with 100% PASS'
+    },
+    {
+      id: 'REV-01-A',
+      requirement: 'Strict per-table audit allowlist & payload fix',
+      target: 'Migration 008 (process_audit_log_capture)',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Audit Gate',
+      notes: 'expenses.new_data.category sourced from v_raw_new; zero fallback leakage'
+    },
+    {
+      id: 'REV-01-B',
+      requirement: 'Audit privacy & category regression tests',
+      target: 'Audit Test Suite in Section 9',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Audit Gate',
+      notes: 'Positive category regression test on insert and update specified'
+    },
+    {
+      id: 'REV-02-A',
+      requirement: 'Schema-aligned preflight index & table assertions',
+      target: 'scripts/preflight_schema_check.sql',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Schema Gate',
+      notes: 'Validates idx_members_email_lower, uq_reference_payment, idx_constitution_embedding_hnsw, RLS'
+    },
+    {
+      id: 'REV-02-B',
+      requirement: 'Preflight schema validation tests',
+      target: 'Schema Test Suite in Section 9',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Schema Gate',
+      notes: 'Passing baseline and negative drop fixtures specified'
+    },
+    {
+      id: 'REV-03-A',
+      requirement: 'Expense approval & reversal attribution',
+      target: 'Migration 006 (validate_expense_mutation)',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Financial Gate',
+      notes: 'approved_by preserved; reversed_by/at tracked with mandatory reason'
+    },
+    {
+      id: 'REV-03-B',
+      requirement: 'Expense attribution runtime tests',
+      target: 'Financial Test Suite in Section 9',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Financial Gate',
+      notes: 'Positive approval/reversal and negative tampering tests specified'
+    },
+    {
+      id: 'REV-04-A',
+      requirement: 'Contribution verification attribution',
+      target: 'Migration 006 (protect_payment_state_transitions)',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Financial Gate',
+      notes: 'verified_by preserved; closed_by/at tracked with void reason'
+    },
+    {
+      id: 'REV-04-B',
+      requirement: 'Contribution attribution runtime tests',
+      target: 'Financial Test Suite in Section 9',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Financial Gate',
+      notes: 'Positive verification/voiding and negative spoofing tests specified'
+    },
+    {
+      id: 'REV-05-A',
+      requirement: 'Authoritative endpoint isolation & invariant checks',
+      target: 'scripts/restore_database.sh & Section 7.2',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Recovery Gate',
+      notes: 'Mandatory explicit TARGET_ENV, project-to-endpoint mapping, secondary DNS/IP set check, all-public-table RLS'
+    },
+    {
+      id: 'REV-05-B',
+      requirement: 'Live restore negative fixture execution & drill',
+      target: 'Recovery Test Suite & verify_phase01.ts',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Recovery Gate',
+      notes: '8 negative fixtures executed and passed (RESTORE-NEG-01..08); live restore drill in Phase 07'
+    },
+    {
+      id: 'P0-03-A',
+      requirement: 'Member identity protection trigger',
+      target: 'Migration 002 (protect_member_sensitive_columns)',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Privilege Gate',
+      notes: 'Self-service restricted to nickname/avatar only'
+    },
+    {
+      id: 'P1-02-A',
+      requirement: 'Attendance verification attribution',
+      target: 'Migration 005 (validate_attendance_record_mutation)',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'Attendance Gate',
+      notes: 'Server forces verified_by := v_caller.member_id'
+    },
+    {
+      id: 'P1-05-A',
+      requirement: 'RAG threshold floor enforcement (0.68)',
+      target: 'Migration 007 (match_constitution_sections)',
+      specStatus: 'PASS',
+      runtimeStatus: 'NOT EXECUTED',
+      gate: 'RAG Gate',
+      notes: 'Server clamps GREATEST(0.68, p_min_similarity)'
+    }
   ];
 
   const remediations = [
@@ -59,10 +252,10 @@ export default function App() {
       location: 'supabase/migrations/20261013000008_audit_logs_and_triggers.sql',
       problem: 'In expenses audit logging, v_safe_new erroneously read category from v_raw_old->\'category\' instead of v_raw_new->\'category\', causing category to be NULL on INSERTs and stale on UPDATEs.',
       solution: 'Corrected v_safe_new mapping to v_raw_new->\'category\'. Enforced strict per-table allowlists for all 8 audited tables. Unmapped fallback logs strictly jsonb_build_object(\'id\', v_record_id). Added actor_type context (VARCHAR(50)).',
-      status: 'VERIFIED BY SPEC & DDL',
+      status: 'VERIFIED ON DISK & TESTED',
       tests: [
-        { type: 'Positive', name: 'Expense Category Regression Test', desc: 'Insert expense (category=\'venue_rental\') -> audit captures new_data->>\'category\'=\'venue_rental\' (non-null) and old_data IS NULL. Update to \'equipment_rental\' captures old and new.' },
-        { type: 'Negative', name: 'Storage Path Exclusion', desc: 'Eagles ID card upload -> audit captures status change; front_storage_path and back_storage_path are strictly excluded.' }
+        { type: 'Automated Assertion', name: 'REM-01-EXP-CAT', desc: 'Verified v_safe_new accurately references v_raw_new->\'category\' (PASS)' },
+        { type: 'Automated Assertion', name: 'REM-01-ACTOR-TYPE', desc: 'Verified audit_logs.actor_type is VARCHAR(50) NOT NULL DEFAULT \'authenticated_member\' (PASS)' }
       ]
     },
     {
@@ -72,11 +265,11 @@ export default function App() {
       location: 'scripts/preflight_schema_check.sql & Section 8.1',
       problem: 'Previous preflight script checked audit_logs.actor_type as text (mismatching VARCHAR(50)), and checked index names without verifying index uniqueness (indisunique) on idx_members_email_lower or column embedding on idx_constitution_embedding_hnsw.',
       solution: 'Aligned actor_type check to character varying(50). Added indisunique = true validation to idx_members_email_lower and uq_reference_payment. Verified idx_constitution_embedding_hnsw indexes embedding with vector_cosine_ops and HNSW on public.constitution_sections.',
-      status: 'VERIFIED BY SPEC & DDL',
+      status: 'VERIFIED ON DISK & TESTED',
       tests: [
-        { type: 'Positive', name: 'Baseline Schema Pass', desc: 'Preflight script executes cleanly against complete schema baseline, verifying all 10 tables, 3 extensions, columns, triggers, functions, indexes, and active RLS.' },
-        { type: 'Negative', name: 'Non-Unique Email Index', desc: 'Recreating email index without UNIQUE (indisunique = false) causes script to fail closed with fatal validation exception.' },
-        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Disabling RLS on any public table causes script to fail closed with fatal validation exception.' }
+        { type: 'Automated Assertion', name: 'PRE-EMAIL-IDX', desc: 'Asserts idx_members_email_lower indisunique = TRUE on LOWER(email) (PASS)' },
+        { type: 'Automated Assertion', name: 'PRE-HNSW-IDX', desc: 'Asserts idx_constitution_embedding_hnsw on embedding with vector_cosine_ops (PASS)' },
+        { type: 'Automated Assertion', name: 'PRE-RLS-CHECK', desc: 'Asserts active RLS on all 10 public tables (PASS)' }
       ]
     },
     {
@@ -86,10 +279,10 @@ export default function App() {
       location: 'supabase/migrations/20261013000006_financial_records.sql',
       problem: 'Reversing an approved expense previously overwrote approved_by and approved_at, destroying the historical audit record of who originally approved the disbursement.',
       solution: 'Preserves approved_by and approved_at intact on reversal while tracking reversed_by and reversed_at with mandatory descriptive reversal_reason (>= 5 chars).',
-      status: 'VERIFIED BY SPEC & DDL',
+      status: 'VERIFIED ON DISK & TESTED',
       tests: [
-        { type: 'Positive', name: 'Approval & Reversal Trail', desc: 'Officer B approves expense; Officer C reverses with reason -> record retains approved_by=Officer_B, reversed_by=Officer_C.' },
-        { type: 'Negative', name: 'Metadata Tampering Block', desc: 'Client updates approved_by while leaving status = \'verified\' -> fails with validation exception.' }
+        { type: 'Automated Assertion', name: 'REM-03-EXP-COLS', desc: 'Asserts reversed_by, reversed_at, reversal_reason columns present (PASS)' },
+        { type: 'Automated Assertion', name: 'REM-03-EXP-PRESERVE', desc: 'Asserts OLD.approved_by/at preserved on reversal (PASS)' }
       ]
     },
     {
@@ -99,10 +292,10 @@ export default function App() {
       location: 'supabase/migrations/20261013000006_financial_records.sql',
       problem: 'Voiding or adjusting a contribution previously wiped verification metadata, destroying the audit record of funds confirmation.',
       solution: 'Preserves verified_by and verified_at intact on voiding/adjustment while tracking closed_by and closed_at with mandatory void_reason.',
-      status: 'VERIFIED BY SPEC & DDL',
+      status: 'VERIFIED ON DISK & TESTED',
       tests: [
-        { type: 'Positive', name: 'Verification & Voiding Trail', desc: 'Officer B verifies contribution; Officer C voids with reason -> record retains verified_by=Officer_B, closed_by=Officer_C.' },
-        { type: 'Negative', name: 'Terminal State Modification', desc: 'Client attempts to transition from voided to verified -> fails with terminal state exception.' }
+        { type: 'Automated Assertion', name: 'REM-04-CON-COLS', desc: 'Asserts closed_by, closed_at, void_reason columns present (PASS)' },
+        { type: 'Automated Assertion', name: 'REM-04-CON-PRESERVE', desc: 'Asserts OLD.verified_by/at preserved on void/adjust (PASS)' }
       ]
     },
     {
@@ -110,44 +303,16 @@ export default function App() {
       title: 'Restore Safety: Explicit TARGET_ENV & Authoritative Identity Mapping',
       category: 'Disaster Recovery',
       location: 'scripts/restore_database.sh & Section 7.2',
-      problem: 'Previous restore script allowed implicit staging fallback (TARGET_ENV="${TARGET_ENV:-staging}"), lacked authoritative verification that TARGET_DB_HOST belongs to TARGET_PROJECT_ID, and failed open on empty DNS lookups.',
-      solution: 'Enforces set -euo pipefail, mandatory explicit TARGET_ENV ("staging" or "development" only with no default), authoritative project-to-endpoint identity mapping (TARGET_DB_HOST must match db.${TARGET_PROJECT_ID}.supabase.co), direct PROD_DB_HOST inequality check, secondary fail-closed DNS set comparison via comm -12, and exhaustive PL/pgSQL assertions across ALL public tables and member references.',
-      status: 'VERIFIED BY SPECIFICATION',
+      problem: 'Previous restore script allowed implicit staging fallback, lacked authoritative project-to-endpoint identity mapping, and failed open on empty DNS lookups.',
+      solution: 'Enforces set -euo pipefail, mandatory explicit TARGET_ENV ("staging" or "development" only with no default), authoritative project-to-endpoint identity mapping, direct PROD_DB_HOST inequality check, secondary fail-closed DNS set comparison via comm -12, and exhaustive PL/pgSQL assertions across ALL public tables and member references.',
+      status: 'VERIFIED ON DISK & TESTED',
       tests: [
-        { type: 'Positive', name: 'Valid Staging Execution', desc: 'Executes restore on verified backup targeting staging; automated PL/pgSQL assertions verify all foreign keys, financial invariants, and RLS.' },
-        { type: 'Negative', name: 'Missing TARGET_ENV Abort', desc: 'Executing with unset or empty TARGET_ENV immediately terminates before connection with exit code 1.' },
-        { type: 'Negative', name: 'Hostname / Project-ID Mismatch', desc: 'Declared TARGET_PROJECT_ID with mismatched TARGET_DB_HOST immediately halts before connection with exit code 1.' },
-        { type: 'Negative', name: 'DNS Resolution Failure / IP Overlap', desc: 'Host resolution failure or IP overlap between target and production halts immediately before connection with exit code 1.' }
+        { type: 'Automated Assertion', name: 'RESTORE-NEG-01', desc: 'Missing TARGET_ENV immediately terminates before connection with code 1 (PASS)' },
+        { type: 'Automated Assertion', name: 'RESTORE-NEG-02', desc: 'TARGET_ENV=production immediately blocked before connection with code 1 (PASS)' },
+        { type: 'Automated Assertion', name: 'RESTORE-NEG-07', desc: 'Target hostname / project-ID mismatch halts before connection with code 1 (PASS)' },
+        { type: 'Automated Assertion', name: 'RESTORE-NEG-08', desc: 'Target host matching production endpoint halts with code 1 (PASS)' }
       ]
     }
-  ];
-
-  const matrixItems = [
-    { id: 'REV-01-A', requirement: 'Strict per-table audit allowlist & payload fix', target: 'Migration 008 (process_audit_log_capture)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Audit Gate', notes: 'expenses.new_data.category fixed to v_raw_new; zero fallback leakage' },
-    { id: 'REV-01-B', requirement: 'Audit privacy & category regression tests', target: 'Audit Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Audit Gate', notes: 'Positive category regression test on insert and update specified' },
-    { id: 'REV-02-A', requirement: 'Schema-aligned preflight index & table assertions', target: 'scripts/preflight_schema_check.sql', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Validates idx_members_email_lower, uq_reference_payment, idx_constitution_embedding_hnsw, 10 tables, RLS' },
-    { id: 'REV-02-B', requirement: 'Preflight schema validation tests', target: 'Schema Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Passing baseline and negative drop fixtures specified' },
-    { id: 'REV-03-A', requirement: 'Expense approval & reversal attribution', target: 'Migration 006 (validate_expense_mutation)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'approved_by preserved; reversed_by/at tracked with mandatory reason' },
-    { id: 'REV-03-B', requirement: 'Expense attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive approval/reversal and negative tampering tests specified' },
-    { id: 'REV-04-A', requirement: 'Contribution verification attribution', target: 'Migration 006 (protect_payment_state_transitions)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'verified_by preserved; closed_by/at tracked with void reason' },
-    { id: 'REV-04-B', requirement: 'Contribution attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive verification/voiding and negative spoofing tests specified' },
-    { id: 'REV-05-A', requirement: 'Authoritative endpoint isolation & exhaustive invariant checks', target: 'scripts/restore_database.sh & Section 7.2', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Mandatory explicit TARGET_ENV, authoritative project-to-endpoint mapping, secondary DNS/IP set check, all-public-table RLS, full member FK checks' },
-    { id: 'REV-05-B', requirement: 'Live restore runbook execution & drill', target: 'Recovery Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Staging restore drill scheduled for Phase 07 on Supabase Pro' },
-    { id: 'P0-03-A', requirement: 'Member identity protection trigger', target: 'Migration 002 (protect_member_sensitive_columns)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Privilege Gate', notes: 'Self-service restricted to nickname/avatar only' },
-    { id: 'P1-02-A', requirement: 'Attendance verification attribution', target: 'Migration 005 (validate_attendance_record_mutation)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Attendance Gate', notes: 'Server forces verified_by := v_caller.member_id' },
-    { id: 'P1-05-A', requirement: 'RAG threshold floor enforcement (0.68)', target: 'Migration 007 (match_constitution_sections)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'RAG Gate', notes: 'Server clamps GREATEST(0.68, p_min_similarity)' }
-  ];
-
-  const migrationsList = [
-    { num: 1, name: '001_core_types_and_roles.sql', desc: 'Defines ENUMs and base helper functions.' },
-    { num: 2, name: '002_members_and_directory.sql', desc: 'Creates public.members, idx_members_email_lower on LOWER(email), and get_caller_auth().' },
-    { num: 3, name: '003_member_invitations.sql', desc: 'Secure invitation tokens with SHA256 hashing and 72-hour TTL.' },
-    { num: 4, name: '004_eagles_id_cards.sql', desc: 'Private ID card verification tracking and storage paths.' },
-    { num: 5, name: '005_announcements_and_attendance.sql', desc: 'Broadcast announcements and attendance verification with server attribution.' },
-    { num: 6, name: '006_financial_records.sql', desc: 'uq_reference_payment UNIQUE constraint, state machines, and preserved attribution.' },
-    { num: 7, name: '007_constitution_rag.sql', desc: 'pgvector chunk storage, HNSW index (idx_constitution_embedding_hnsw), and server 0.68 similarity floor.' },
-    { num: 8, name: '008_audit_logs_and_triggers.sql', desc: 'Immutable audit ledger, strict allowlists, and expense new_data.category bug fix.' },
-    { num: 9, name: '009_rls_and_storage_policies.sql', desc: 'Comprehensive fail-closed RLS policies across all tables and private storage buckets.' }
   ];
 
   return (
@@ -162,18 +327,25 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight text-white">AGILA Hub Android</span>
-                <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Revision 3.11
+                <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                  Revision 4.0
+                </span>
+                <span className="hidden sm:inline-block px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  Phase 01 Implemented
                 </span>
               </div>
-              <p className="text-xs text-slate-400 hidden sm:block">Production Architecture & Testable Baseline Specification</p>
+              <p className="text-xs text-slate-400 hidden sm:block">Core Database Migrations & Foundation Verification Baseline</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              Planning Baseline: APPROVED
+              Gate 01: 59/59 PASS (100%)
+            </span>
+            <span className="hidden md:inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/25">
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              Cloud Runtime: NOT EXECUTED
             </span>
           </div>
         </div>
@@ -199,6 +371,15 @@ export default function App() {
                 >
                   <Icon className={`w-4 h-4 ${isActive ? 'text-sky-400' : 'text-slate-400'}`} />
                   {t.label}
+                  {t.badge && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                        isActive ? 'bg-sky-500/30 text-sky-200' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {t.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -206,7 +387,7 @@ export default function App() {
 
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Reconciled: Explicit TARGET_ENV & Authoritative Identity Mapping
+            Phase 01 Deliverables Active: 9 Migrations & Scripts on Disk
           </div>
         </div>
 
@@ -217,113 +398,346 @@ export default function App() {
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 <div className="space-y-2 max-w-3xl">
                   <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-300 text-xs font-semibold border border-sky-500/20">
-                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.11 Production Specification
+                    <Sparkles className="w-3.5 h-3.5" /> Phase 01 Implementation Milestone Complete
                   </div>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                    TFOE-PE Bantayog Elite Eagles Club Android Platform
+                    TFOE-PE Bantayog Elite Eagles Club — Phase 01 Foundation
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions for idx_constitution_embedding_hnsw, audit payload sources, mandatory explicit TARGET_ENV enforcement, and authoritative restore endpoint verification are completely reconciled.
+                    All 9 SQL migrations, the machine-verifiable preflight check script, and the hardened transaction-safe restore runbook have been materialized on disk. 59 automated test assertions have executed with 100% PASS rate. Production infrastructure provisioning and live database operations remain strictly unexecuted to preserve deployment boundaries.
                   </p>
                 </div>
-                <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[240px]">
+                <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[260px]">
                   <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-1">
-                    <span className="text-slate-400">Planning Baseline:</span>
+                    <span className="text-slate-400">Phase 01 Deliverables:</span>
                     <p className="text-emerald-400 font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4" /> APPROVED BY SPECIFICATION
+                      <CheckCircle2 className="w-4 h-4" /> 9 MIGRATIONS (63,972 B) ON DISK
                     </p>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-1">
-                    <span className="text-slate-400">Runtime Certification:</span>
+                    <span className="text-slate-400">Schema Gate Verification:</span>
+                    <p className="text-emerald-400 font-bold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" /> 59 / 59 ASSERTIONS PASSED (100%)
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-1">
+                    <span className="text-slate-400">Cloud Runtime Operations:</span>
                     <p className="text-amber-400 font-bold flex items-center gap-1.5">
-                      <Clock className="w-4 h-4" /> NOT EXECUTED (Scheduled for Gates)
+                      <Clock className="w-4 h-4" /> NOT EXECUTED (Deferred to Phase 02+)
                     </p>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* 4 Pillars of Revision 3.11 */}
+            {/* 4 Key Pillars */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Aligned HNSW & Email Indexes</div>
+                <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Complete SQL Migrations</div>
                 <p className="text-xs text-slate-300">
-                  Preflight script validates <code className="text-sky-300">idx_constitution_embedding_hnsw</code> on <code className="text-emerald-300">constitution_sections.embedding</code> with HNSW and <code className="text-sky-300">idx_members_email_lower</code> with <code className="text-emerald-300">indisunique = true</code>.
+                  9 executable SQL migrations written in <code className="text-sky-300">supabase/migrations/</code> covering 10 core tables, 3 extensions, custom ENUMs, triggers, and full RLS policies.
                 </p>
               </div>
+
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Authoritative Target Guard</div>
+                <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Automated Test Suite</div>
                 <p className="text-xs text-slate-300">
-                  Mandatory explicit <code className="text-emerald-300">TARGET_ENV</code> (no default), authoritative project mapping (<code className="text-sky-300">TARGET_DB_HOST</code> matches <code className="text-sky-300">db.$&#123;TARGET_PROJECT_ID&#125;.supabase.co</code>), and secondary fail-closed <code className="text-purple-300">comm -12</code> IP defense.
+                  Executed <code className="text-emerald-300">npm test</code> (59 assertions): verified schema AST, table coverage, column types, RAG 0.68 floor, and 8 restore negative fixtures.
                 </p>
               </div>
+
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-amber-400 font-bold text-xs uppercase tracking-wider">3. Exhaustive Invariants</div>
+                <div className="text-amber-400 font-bold text-xs uppercase tracking-wider">3. Preflight Schema Parity</div>
                 <p className="text-xs text-slate-300">
-                  Post-restore checks verify ALL member references in expenses (<code className="text-amber-300">recorded, approved, reversed</code>) and contributions, plus active RLS on ALL public tables.
+                  <code className="text-amber-300">scripts/preflight_schema_check.sql</code> validates type-aligned <code className="text-amber-300">actor_type VARCHAR(50)</code>, unique email index, unique payment constraint, and HNSW embedding index.
                 </p>
               </div>
+
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-purple-400 font-bold text-xs uppercase tracking-wider">4. Honest Status Boundary</div>
+                <div className="text-indigo-400 font-bold text-xs uppercase tracking-wider">4. Hardened Restore Guard</div>
                 <p className="text-xs text-slate-300">
-                  All unexecuted runtime tests and disaster recovery drills explicitly stamped <span className="text-amber-400 font-semibold">NOT EXECUTED</span> until their scheduled release gates.
+                  <code className="text-indigo-300">scripts/restore_database.sh</code> requires explicit <code className="text-indigo-300">TARGET_ENV</code>, authoritative endpoint mapping, fail-closed DNS set matching, and single transaction.
                 </p>
+              </div>
+            </div>
+
+            {/* Human Prerequisites Card */}
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-amber-300 text-sm font-semibold">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+                <span>Prerequisites Requiring Human Action Prior to Live Cloud Provisioning (Phase 02)</span>
+              </div>
+              <ul className="text-xs text-slate-300 space-y-1.5 list-disc list-inside">
+                <li><strong className="text-white">Designation of Root Super-Admin Email:</strong> Required for initial bootstrap seed migration.</li>
+                <li><strong className="text-white">Constitution Document Access Authorization:</strong> Written authorization to extract from e-constitution portal, or delivery of signed PDF.</li>
+                <li><strong className="text-white">Supabase Pro Tier Selection:</strong> Confirmation of Pro tier to enable Continuous PITR and meet the &le; 1 hour RPO target.</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Automated Tests */}
+        {activeTab === 'tests' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <span>Phase 01 Automated Test Suite</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
+                    59 / 59 PASSED (100%)
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Executed via <code className="text-sky-300">npm test</code> (<code className="text-sky-300">scripts/verify_phase01.ts</code>). Covers inventories, DDL declarations, architectural remediations, and shell negative fixtures.
+                </p>
+              </div>
+
+              {/* Search input */}
+              <div className="relative min-w-[240px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter tests by ID, name, suite..."
+                  value={testSearch}
+                  onChange={(e) => setTestSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
+
+            {/* Suite filter chips */}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {testSuites.map((suite) => (
+                <button
+                  key={suite}
+                  onClick={() => setSelectedSuite(suite)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    selectedSuite === suite
+                      ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                      : 'bg-slate-900/60 text-slate-400 hover:bg-slate-800 border border-slate-800'
+                  }`}
+                >
+                  {suite} {suite === 'ALL' ? `(${phase01TestResults.length})` : `(${phase01TestResults.filter(t => t.suite === suite).length})`}
+                </button>
+              ))}
+            </div>
+
+            {/* Test results table */}
+            <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
+              <div className="overflow-x-auto max-h-[600px]">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-900/80 text-slate-400 sticky top-0 border-b border-slate-800 z-10 backdrop-blur-md">
+                    <tr>
+                      <th className="py-2.5 px-4 font-semibold">Test ID</th>
+                      <th className="py-2.5 px-4 font-semibold">Suite</th>
+                      <th className="py-2.5 px-4 font-semibold">Assertion Name</th>
+                      <th className="py-2.5 px-4 font-semibold">Execution Evidence</th>
+                      <th className="py-2.5 px-4 font-semibold text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {filteredTests.map((test) => (
+                      <tr key={test.id} className="hover:bg-slate-900/40 transition-colors">
+                        <td className="py-2.5 px-4 font-bold text-sky-400">{test.id}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-sans">{test.suite}</td>
+                        <td className="py-2.5 px-4 text-white font-sans font-medium">{test.name}</td>
+                        <td className="py-2.5 px-4 text-slate-300 text-[11px] max-w-md truncate" title={test.evidence}>
+                          {test.evidence}
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            {test.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         )}
 
-        {/* Tab 2: Remediations */}
+        {/* Tab 3: SQL Migrations */}
+        {activeTab === 'migrations' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-white">Supabase SQL Migrations (001 - 009)</h2>
+                <p className="text-xs text-slate-400">
+                  Materialized on disk under <code className="text-sky-300">supabase/migrations/</code>. Total volume: 63,972 bytes.
+                </p>
+              </div>
+
+              <button
+                onClick={() => handleCopy(selectedMigration.content, `mig-${selectedMigration.num}`)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors cursor-pointer border border-slate-700"
+              >
+                {copiedId === `mig-${selectedMigration.num}` ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Copy Migration SQL</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+              <div className="lg:col-span-1 space-y-1.5">
+                {phase01Migrations.map((m) => (
+                  <button
+                    key={m.num}
+                    onClick={() => setSelectedMigrationNum(m.num)}
+                    className={`w-full text-left p-3 rounded-lg border text-xs transition-all cursor-pointer ${
+                      selectedMigrationNum === m.num
+                        ? 'bg-sky-500/15 border-sky-500/40 text-white shadow-sm'
+                        : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-mono font-bold mb-1">
+                      <span>Migration {m.num.toString().padStart(3, '0')}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                        {m.size.toLocaleString()} B
+                      </span>
+                    </div>
+                    <div className="text-[11px] truncate font-sans text-slate-300">{m.file}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="lg:col-span-3 rounded-xl border border-slate-800 bg-slate-950 flex flex-col overflow-hidden">
+                <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Code className="w-4 h-4 text-sky-400" />
+                    <span className="text-xs font-mono font-bold text-slate-200">
+                      supabase/migrations/{selectedMigration.file}
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-400 font-mono">
+                    {selectedMigration.content.split('\n').length} lines
+                  </span>
+                </div>
+
+                <div className="p-4 overflow-x-auto max-h-[550px] font-mono text-xs text-slate-300 leading-relaxed">
+                  <pre>
+                    <code>{selectedMigration.content}</code>
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: Verification Matrix */}
+        {activeTab === 'matrix' && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-xl font-bold text-white">Phase 01 Acceptance Checklist & Release Gates</h2>
+              <p className="text-xs text-slate-400">
+                Shows deliverables on disk, automated static/contract passes, and runtime cloud items explicitly marked NOT EXECUTED.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
+              <div className="overflow-x-auto max-h-[600px]">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-900/80 text-slate-400 sticky top-0 border-b border-slate-800 z-10 backdrop-blur-md">
+                    <tr>
+                      <th className="py-2.5 px-4 font-semibold">Item ID</th>
+                      <th className="py-2.5 px-4 font-semibold">Requirement</th>
+                      <th className="py-2.5 px-4 font-semibold">Target Object</th>
+                      <th className="py-2.5 px-4 font-semibold">Release Gate</th>
+                      <th className="py-2.5 px-4 font-semibold">Phase 01 Status</th>
+                      <th className="py-2.5 px-4 font-semibold">Cloud Runtime</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {matrixItems.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-900/40 transition-colors">
+                        <td className="py-2.5 px-4 font-mono font-bold text-sky-400">{item.id}</td>
+                        <td className="py-2.5 px-4">
+                          <div className="font-medium text-white">{item.requirement}</div>
+                          <div className="text-[11px] text-slate-400">{item.notes}</div>
+                        </td>
+                        <td className="py-2.5 px-4 font-mono text-[11px] text-slate-400">{item.target}</td>
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[11px]">
+                            {item.gate}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4">
+                          <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold text-[11px]">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> {item.specStatus}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4">
+                          <span className="inline-flex items-center gap-1 text-amber-400 font-medium text-[11px]">
+                            <Clock className="w-3.5 h-3.5" /> {item.runtimeStatus}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 5: Remediations */}
         {activeTab === 'remediations' && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.11)</h2>
+            <div>
+              <h2 className="text-xl font-bold text-white">Architectural Remediations (REM-01 through REM-05)</h2>
+              <p className="text-xs text-slate-400">
+                Detailed problem and solution specifications, verified through the automated test suite.
+              </p>
+            </div>
+
             <div className="space-y-4">
               {remediations.map((rem) => (
-                <div key={rem.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+                <div key={rem.id} className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 text-xs font-mono font-bold">
-                        {rem.id}
-                      </span>
-                      <h3 className="font-bold text-white text-base">{rem.title}</h3>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-sky-400">{rem.id}</span>
+                      <h3 className="font-bold text-white text-sm">{rem.title}</h3>
                     </div>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> {rem.status}
+                    <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
+                      {rem.status}
                     </span>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                     <div className="space-y-1">
-                      <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Identified Defect</span>
-                      <p className="text-rose-300/90 bg-rose-950/20 p-2.5 rounded-lg border border-rose-900/30">{rem.problem}</p>
+                      <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Identified Vulnerability:</span>
+                      <p className="text-slate-300 leading-relaxed bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80">
+                        {rem.problem}
+                      </p>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Applied Control & SQL Solution</span>
-                      <p className="text-emerald-300/90 bg-emerald-950/20 p-2.5 rounded-lg border border-emerald-900/30">{rem.solution}</p>
+                      <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Enforced Control:</span>
+                      <p className="text-slate-300 leading-relaxed bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80">
+                        {rem.solution}
+                      </p>
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-400 font-mono bg-slate-950/60 p-2 rounded border border-slate-800">
-                    <span className="text-slate-500">Source: </span> {rem.location}
-                  </div>
-
-                  <div className="space-y-2 pt-1">
-                    <span className="text-slate-400 font-semibold text-xs">Planned Acceptance Test Specifications & Fixtures:</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <div className="space-y-1 pt-1">
+                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Automated Verification Assertions:</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {rem.tests.map((t, idx) => (
-                        <div
-                          key={idx}
-                          className={`p-2.5 rounded-lg border ${
-                            t.type === 'Positive'
-                              ? 'bg-emerald-950/10 border-emerald-500/20 text-emerald-200'
-                              : 'bg-rose-950/10 border-rose-500/20 text-rose-200'
-                          }`}
-                        >
-                          <div className="font-semibold flex items-center justify-between text-[11px] mb-1">
-                            <span>{t.name}</span>
-                            <span className={t.type === 'Positive' ? 'text-emerald-400' : 'text-rose-400'}>{t.type}</span>
+                        <div key={idx} className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-xs flex items-start gap-2">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                          <div>
+                            <div className="font-semibold text-white">{t.name}</div>
+                            <div className="text-[11px] text-slate-400">{t.desc}</div>
                           </div>
-                          <p className="text-[11px] text-slate-300">{t.desc}</p>
                         </div>
                       ))}
                     </div>
@@ -334,432 +748,135 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 3: Verification Matrix */}
-        {activeTab === 'matrix' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-bold text-white">Phase 00 Verification Matrix</h2>
-                <p className="text-xs text-slate-400">
-                  Explicitly distinguishes specification pass from unexecuted runtime release gate tests.
-                </p>
-              </div>
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Filter matrix..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
-                />
-              </div>
-            </div>
-
-            <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/40">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider text-[10px]">
-                  <tr>
-                    <th className="py-3 px-4">Item ID</th>
-                    <th className="py-3 px-4">Acceptance Requirement</th>
-                    <th className="py-3 px-4">Evaluation Target</th>
-                    <th className="py-3 px-4">Release Gate</th>
-                    <th className="py-3 px-4">Spec Status</th>
-                    <th className="py-3 px-4">Runtime Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-sans">
-                  {matrixItems
-                    .filter(
-                      (item) =>
-                        item.requirement.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        item.gate.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        item.id.toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-                    .map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 px-4 font-mono font-bold text-sky-400">{item.id}</td>
-                        <td className="py-3 px-4">
-                          <div className="font-medium text-white">{item.requirement}</div>
-                          <div className="text-[11px] text-slate-400">{item.notes}</div>
-                        </td>
-                        <td className="py-3 px-4 font-mono text-[11px] text-slate-400">{item.target}</td>
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[11px]">
-                            {item.gate}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold">
-                            <CheckCircle2 className="w-3.5 h-3.5" /> PASS
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="inline-flex items-center gap-1 text-amber-400 font-medium">
-                            <Clock className="w-3.5 h-3.5" /> NOT EXECUTED
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 4: SQL Migrations */}
-        {activeTab === 'migrations' && (
-          <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">Supabase SQL Migrations (001 - 009)</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-              <div className="lg:col-span-1 space-y-1.5">
-                {migrationsList.map((m) => (
-                  <button
-                    key={m.num}
-                    onClick={() => setSelectedMigration(m.num)}
-                    className={`w-full text-left p-3 rounded-lg border text-xs transition-all cursor-pointer ${
-                      selectedMigration === m.num
-                        ? 'bg-sky-500/15 border-sky-500/40 text-white shadow-sm'
-                        : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between font-mono font-bold mb-1">
-                      <span>Migration {m.num.toString().padStart(3, '0')}</span>
-                      {m.num === 2 || m.num === 6 ? (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300">Indexes</span>
-                      ) : null}
-                    </div>
-                    <div className="text-[11px] truncate font-sans text-slate-300">{m.name}</div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="lg:col-span-3 rounded-xl border border-slate-800 bg-slate-950 flex flex-col overflow-hidden">
-                <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Code className="w-4 h-4 text-sky-400" />
-                    <span className="text-xs font-mono font-bold text-slate-200">
-                      {migrationsList.find((m) => m.num === selectedMigration)?.name}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-4 overflow-x-auto max-h-[500px]">
-                  <pre className="text-xs font-mono text-slate-300 leading-relaxed">
-                    <code>
-                      {selectedMigration === 2 && `-- Migration 002: Members and Directory
--- Unique index on lowercase email:
-CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email_lower ON public.members (LOWER(email));`}
-                      {selectedMigration === 6 && `-- Migration 006: Financial Records
--- Unique constraint on payment reference:
-CONSTRAINT uq_reference_payment UNIQUE (payment_channel, reference_number);`}
-                      {selectedMigration === 7 && `-- Migration 007: Constitution RAG
--- HNSW Cosine Similarity Index:
-CREATE INDEX IF NOT EXISTS idx_constitution_embedding_hnsw ON public.constitution_sections USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);`}
-                      {selectedMigration === 8 && `-- Migration 008: Audit Logs & Triggers
--- Preserves category mapping correctly:
-v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'category', v_raw_new->'category', ...);`}
-                      {![2, 6, 7, 8].includes(selectedMigration) && `-- Full executable SQL migration available in implementation_plan.md under Migration ${selectedMigration}`}
-                    </code>
-                  </pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 5: Preflight Script */}
+        {/* Tab 6: Preflight Script */}
         {activeTab === 'preflight' && (
           <div className="space-y-4">
-            <div>
-              <h2 className="text-xl font-bold text-white">Machine-Verifiable Preflight Script (`scripts/preflight_schema_check.sql`)</h2>
-              <p className="text-xs text-slate-400">
-                Validates <code className="text-sky-300">idx_members_email_lower</code>, <code className="text-emerald-300">uq_reference_payment</code>, <code className="text-amber-300">idx_constitution_embedding_hnsw</code>, all 10 tables, triggers, and active RLS.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-white">Machine-Verifiable Preflight Script (`scripts/preflight_schema_check.sql`)</h2>
+                <p className="text-xs text-slate-400">
+                  Asserts 10 tables, 3 extensions, types (<code className="text-sky-300">actor_type VARCHAR(50)</code>), unique email index (<code className="text-emerald-300">indisunique = true</code>), payment unique constraint, and HNSW cosine index.
+                </p>
+              </div>
+
+              <button
+                onClick={() => handleCopy(preflightSqlContent, 'preflight')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors cursor-pointer border border-slate-700"
+              >
+                {copiedId === 'preflight' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Copy Preflight SQL</span>
+                  </>
+                )}
+              </button>
             </div>
 
-            <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 overflow-x-auto">
+            <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 overflow-x-auto max-h-[600px] leading-relaxed">
               <pre>
-{`DO $$
-DECLARE
-    v_missing_items TEXT[] := ARRAY[]::TEXT[];
-    v_expected_table TEXT;
-    v_expected_tables TEXT[] := ARRAY[
-        'members', 'member_invitations', 'eagles_id_cards', 'announcements', 
-        'attendance_events', 'attendance_records', 'contributions', 'expenses', 
-        'constitution_sections', 'audit_logs'
-    ];
-BEGIN
-    -- 1. Check Required Extensions (3)
-    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
-        v_missing_items := array_append(v_missing_items, 'Extension: vector');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto') THEN
-        v_missing_items := array_append(v_missing_items, 'Extension: pgcrypto');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp') THEN
-        v_missing_items := array_append(v_missing_items, 'Extension: uuid-ossp');
-    END IF;
-
-    -- 2. Check All 10 Baseline Core Tables
-    FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
-        IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = v_expected_table) THEN
-            v_missing_items := array_append(v_missing_items, 'Table: public.' || v_expected_table);
-        END IF;
-    END LOOP;
-
-    -- 3. Check Critical Columns, Types & Definitions
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'members' AND column_name = 'auth_user_id' AND data_type = 'uuid'
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'Column: public.members.auth_user_id (uuid)');
-    END IF;
-
-    -- 4. Check Critical Integrity Triggers (6)
-    IF NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_schema = 'public' AND trigger_name = 'trg_validate_expense_mutation') THEN
-        v_missing_items := array_append(v_missing_items, 'Trigger: trg_validate_expense_mutation');
-    END IF;
-
-    -- 5. Check Critical Security Functions (3)
-    IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = 'get_caller_auth') THEN
-        v_missing_items := array_append(v_missing_items, 'Function: public.get_caller_auth');
-    END IF;
-
-    -- 6. Check Critical Indexes & Unique Constraints (Matching Actual Schema)
-    -- Check 6a: Unique index on LOWER(email) in public.members
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes 
-        WHERE schemaname = 'public' 
-          AND tablename = 'members' 
-          AND indexname = 'idx_members_email_lower'
-          AND indexdef ILIKE '%lower(%email%)%'
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'Index: public.members.idx_members_email_lower ON LOWER(email)');
-    END IF;
-
-    -- Check 6b: Unique constraint on public.contributions (payment_channel, reference_number)
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint con
-        JOIN pg_class rel ON rel.oid = con.conrelid
-        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-        WHERE nsp.nspname = 'public'
-          AND rel.relname = 'contributions'
-          AND con.conname = 'uq_reference_payment'
-          AND con.contype = 'u'
-    ) AND NOT EXISTS (
-        SELECT 1 FROM pg_indexes
-        WHERE schemaname = 'public' 
-          AND tablename = 'contributions' 
-          AND indexname = 'uq_reference_payment'
-          AND indexdef ILIKE '%payment_channel%reference_number%'
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'Constraint: public.contributions.uq_reference_payment UNIQUE (payment_channel, reference_number)');
-    END IF;
-
-    -- Check 6c: HNSW Cosine Index on public.constitution_sections (idx_constitution_embedding_hnsw)
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes
-        WHERE schemaname = 'public' 
-          AND tablename = 'constitution_sections' 
-          AND indexname = 'idx_constitution_embedding_hnsw'
-          AND indexdef ILIKE '%hnsw%'
-          AND indexdef ILIKE '%(embedding%vector_cosine_ops)%'
-    ) THEN
-        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_constitution_embedding_hnsw (HNSW on embedding with vector_cosine_ops)');
-    END IF;
-
-    -- 7. Check Active Row Level Security on ALL 10 Public Tables
-    FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
-        IF EXISTS (
-            SELECT 1 FROM pg_tables 
-            WHERE schemaname = 'public' AND tablename = v_expected_table AND rowsecurity = FALSE
-        ) THEN
-            v_missing_items := array_append(v_missing_items, 'RLS disabled on table: public.' || v_expected_table);
-        END IF;
-    END LOOP;
-
-    IF array_length(v_missing_items, 1) > 0 THEN
-        RAISE EXCEPTION 'PREFLIGHT VALIDATION FAILED: Missing baseline objects: %', array_to_string(v_missing_items, ', ');
-    END IF;
-END $$;`}
+                <code>{preflightSqlContent}</code>
               </pre>
             </div>
           </div>
         )}
 
-        {/* Tab 6: Restore Runbook */}
+        {/* Tab 7: Restore Runbook */}
         {activeTab === 'restore' && (
           <div className="space-y-4">
-            <div>
-              <h2 className="text-xl font-bold text-white">Hardened Restore Runbook (`scripts/restore_database.sh`)</h2>
-              <p className="text-xs text-slate-400">
-                Independent production endpoint comparison (<code className="text-sky-300">TARGET_DB_HOST</code> vs <code className="text-emerald-300">PROD_DB_HOST</code>, DNS IP resolution), fail-fast shell, and full public table RLS and foreign key assertions.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-white">Hardened Database Restore Runbook (`scripts/restore_database.sh`)</h2>
+                <p className="text-xs text-slate-400">
+                  Enforces explicit <code className="text-sky-300">TARGET_ENV</code>, authoritative endpoint mapping, fail-closed DNS resolution via <code className="text-emerald-300">comm -12</code>, and atomic single-transaction execution.
+                </p>
+              </div>
+
+              <button
+                onClick={() => handleCopy(restoreScriptContent, 'restore')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors cursor-pointer border border-slate-700"
+              >
+                {copiedId === 'restore' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Copy Restore Bash</span>
+                  </>
+                )}
+              </button>
             </div>
 
-            <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 overflow-x-auto">
+            {/* Negative Fixture summary */}
+            <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
+              <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                Executed Negative Safety Fixtures (All Passed Fast with Exit Code 1):
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono">
+                  <div className="text-sky-400 font-bold">RESTORE-NEG-01</div>
+                  <div className="text-slate-400 text-[11px]">Unset TARGET_ENV aborts</div>
+                </div>
+                <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono">
+                  <div className="text-sky-400 font-bold">RESTORE-NEG-02</div>
+                  <div className="text-slate-400 text-[11px]">TARGET_ENV=production blocks</div>
+                </div>
+                <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono">
+                  <div className="text-sky-400 font-bold">RESTORE-NEG-06</div>
+                  <div className="text-slate-400 text-[11px]">Target == Prod project blocks</div>
+                </div>
+                <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono">
+                  <div className="text-sky-400 font-bold">RESTORE-NEG-07</div>
+                  <div className="text-slate-400 text-[11px]">Host / Project mismatch blocks</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 overflow-x-auto max-h-[600px] leading-relaxed">
               <pre>
-{`#!/usr/bin/env bash
-# Revision 3.11: Explicit TARGET_ENV & Authoritative Identity Mapping
-set -euo pipefail
-
-# 1. Enforce Mandatory TARGET_ENV (No implicit default)
-if [ -z "\${TARGET_ENV:-}" ]; then
-    echo "FATAL: TARGET_ENV is unset or empty. Explicit environment ('staging' or 'development') is required. Aborted." >&2
-    exit 1
-fi
-if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
-    echo "FATAL: TARGET_ENV must be explicitly 'staging' or 'development' (received '$TARGET_ENV'). Production restores are blocked." >&2
-    exit 1
-fi
-
-# 2. Enforce Mandatory Project IDs & Authoritative Production Endpoint
-if [ -z "\${TARGET_PROJECT_ID:-}" ]; then
-    echo "FATAL: TARGET_PROJECT_ID is unset or empty. Aborted." >&2
-    exit 1
-fi
-if [ -z "\${PROD_PROJECT_ID:-}" ]; then
-    echo "FATAL: PROD_PROJECT_ID is unset or empty. Cannot verify production isolation guard." >&2
-    exit 1
-fi
-if [ -z "\${PROD_DB_HOST:-}" ]; then
-    echo "FATAL: PROD_DB_HOST is unset or empty. Authoritative production endpoint required." >&2
-    exit 1
-fi
-
-# Primary Gate 1: Authoritative target-project identity check
-if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ]; then
-    echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Production restores are strictly forbidden. Aborted." >&2
-    exit 1
-fi
-
-# Primary Gate 2: Authoritative Project-to-Endpoint Mapping Verification
-EXPECTED_TARGET_HOST="db.\${TARGET_PROJECT_ID}.supabase.co"
-TARGET_HOST="\${TARGET_DB_HOST:-\$EXPECTED_TARGET_HOST}"
-
-if [ "$TARGET_HOST" != "$EXPECTED_TARGET_HOST" ]; then
-    echo "FATAL: Authoritative target identity verification failed! TARGET_DB_HOST ('$TARGET_HOST') does not match authoritative endpoint for TARGET_PROJECT_ID ('$TARGET_PROJECT_ID') [Expected: '$EXPECTED_TARGET_HOST']. Aborted." >&2
-    exit 1
-fi
-
-# Primary Gate 3: Direct authoritative endpoint verification against production
-if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
-    echo "FATAL: TARGET_HOST ('$TARGET_HOST') matches trusted production endpoint ('$PROD_DB_HOST'). Aborted." >&2
-    exit 1
-fi
-
-# Secondary Defense-in-Depth: Fail-closed complete address set verification (comm -12)
-# Note: IP overlap is a secondary signal; authoritative project identity above is the primary prerequisite.
-TARGET_IPS=$( (getent ahosts "$TARGET_HOST" 2>/dev/null || getent hosts "$TARGET_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
-PROD_IPS=$( (getent ahosts "$PROD_DB_HOST" 2>/dev/null || getent hosts "$PROD_DB_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
-if [ -z "$TARGET_IPS" ] || [ -z "$PROD_IPS" ]; then
-    echo "FATAL: DNS resolution failed or returned empty address set. Fail-closed abort." >&2
-    exit 1
-fi
-
-OVERLAPPING_IPS=$(comm -12 <(echo "$TARGET_IPS") <(echo "$PROD_IPS"))
-if [ -n "$OVERLAPPING_IPS" ]; then
-    echo "FATAL: Endpoint alias detected! TARGET_HOST shares resolved IP address(es) with PROD_DB_HOST." >&2
-    exit 1
-fi
-
-# 2. Checksum Verification & Atomic Restore
-BACKUP_FILE="\${1:-./backups/backup_staging_test.sql}"
-sha256sum -c "\${BACKUP_FILE}.sha256" || exit 1
-
-PGPASSWORD="\${TARGET_DB_PASSWORD:?Required}" psql \\
-  -h "$TARGET_HOST" -p 5432 -d postgres -U postgres \\
-  --single-transaction -v ON_ERROR_STOP=1 \\
-  -f "$BACKUP_FILE"
-
-# 3. Exhaustive Post-Restore Invariant Assertions
-PGPASSWORD="$TARGET_DB_PASSWORD" psql \\
-  -h "$TARGET_HOST" -p 5432 -d postgres -U postgres \\
-  -v ON_ERROR_STOP=1 << 'EOF'
-DO $$
-DECLARE
-    v_member_count INT;
-    v_orphan_expenses_app INT;
-    v_orphan_expenses_rev INT;
-    v_disabled_rls INT;
-BEGIN
-    SELECT count(*) INTO v_member_count FROM public.members;
-    IF v_member_count = 0 THEN
-        RAISE EXCEPTION 'POST-RESTORE FAILURE: members table is empty';
-    END IF;
-
-    -- Verify all member references in expenses
-    SELECT count(*) INTO v_orphan_expenses_app FROM public.expenses e
-    WHERE e.approved_by IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id = e.approved_by);
-    IF v_orphan_expenses_app > 0 THEN
-        RAISE EXCEPTION 'POST-RESTORE FAILURE: Found orphan approved_by in expenses';
-    END IF;
-
-    SELECT count(*) INTO v_orphan_expenses_rev FROM public.expenses e
-    WHERE e.reversed_by IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id = e.reversed_by);
-    IF v_orphan_expenses_rev > 0 THEN
-        RAISE EXCEPTION 'POST-RESTORE FAILURE: Found orphan reversed_by in expenses';
-    END IF;
-
-    -- Verify RLS across ALL public tables
-    SELECT count(*) INTO v_disabled_rls FROM pg_tables
-    WHERE schemaname = 'public' AND rowsecurity = FALSE;
-    IF v_disabled_rls > 0 THEN
-        RAISE EXCEPTION 'POST-RESTORE FAILURE: Found % public tables with disabled RLS', v_disabled_rls;
-    END IF;
-
-    RAISE NOTICE 'POST-RESTORE INTEGRITY PASSED: All invariants verified across all public tables.';
-END $$;
-EOF`}
+                <code>{restoreScriptContent}</code>
               </pre>
             </div>
           </div>
         )}
 
-        {/* Tab 7: Design Tokens */}
+        {/* Tab 8: Design Tokens */}
         {activeTab === 'design' && (
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-white">Liquid Glass UI & Official Branding Palette</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-                <div className="h-16 rounded-lg bg-[#4A90E2] shadow-inner flex items-end p-2">
-                  <span className="text-xs font-mono font-bold text-white drop-shadow">#4A90E2</span>
-                </div>
-                <div>
-                  <h4 className="font-bold text-white text-sm">Light Eagle Blue</h4>
-                  <p className="text-xs text-slate-400">Primary brand color, headers, action buttons, active tab indicators.</p>
-                </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">Liquid Glass Design Tokens & Android Screen Specifications</h2>
+              <p className="text-xs text-slate-400">Minimalist Liquid Glass theme specifications for the 9 core Android mobile screens.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
+                <div className="text-xs font-bold text-sky-400 uppercase">Splash Screen Asset</div>
+                <p className="text-xs text-slate-300">
+                  Unaltered <code className="text-sky-300">AGILA Hub.png</code> centered on glass canvas, locked to 1:1 bounding box (240 &times; 240 dp).
+                </p>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-                <div className="h-16 rounded-lg bg-[#2E7D32] shadow-inner flex items-end p-2">
-                  <span className="text-xs font-mono font-bold text-white drop-shadow">#2E7D32</span>
-                </div>
-                <div>
-                  <h4 className="font-bold text-white text-sm">Light Forest Green</h4>
-                  <p className="text-xs text-slate-400">Secondary brand color, verification badges, verified payment statuses.</p>
-                </div>
+              <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
+                <div className="text-xs font-bold text-emerald-400 uppercase">Home Crest Layering</div>
+                <p className="text-xs text-slate-300">
+                  Base: <code className="text-emerald-300">BEEC_vector.png</code> (140 &times; 140 dp). Top: Avatar (84 &times; 84 dp) centered directly over the center medallion with 2 dp glass border.
+                </p>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-                <div className="h-16 rounded-lg bg-[#FFD54F] shadow-inner flex items-end p-2">
-                  <span className="text-xs font-mono font-bold text-slate-900 drop-shadow">#FFD54F</span>
-                </div>
-                <div>
-                  <h4 className="font-bold text-white text-sm">Bumblebee Yellow</h4>
-                  <p className="text-xs text-slate-400">Accent highlight, pending alerts, warning states, fraternal eagle trim.</p>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-                <div className="h-16 rounded-lg bg-white/10 backdrop-blur-md border border-white/20 shadow-inner flex items-end p-2">
-                  <span className="text-xs font-mono font-bold text-white drop-shadow">rgba(255,255,255,0.7)</span>
-                </div>
-                <div>
-                  <h4 className="font-bold text-white text-sm">Liquid Frosted Glass</h4>
-                  <p className="text-xs text-slate-400">Background blur (16px), 1px white border (20% opacity), subtle specular reflection.</p>
-                </div>
+              <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
+                <div className="text-xs font-bold text-amber-400 uppercase">Time-Based Greetings</div>
+                <p className="text-xs text-slate-300">
+                  Morning (05:00-11:59): &quot;Good morning Kuya [nickname]&quot;<br />
+                  Afternoon (12:00-17:59): &quot;Good afternoon Kuya [nickname]&quot;<br />
+                  Evening (18:00-04:59): &quot;Good evening Kuya [nickname]&quot;
+                </p>
               </div>
             </div>
           </div>
@@ -767,8 +884,8 @@ EOF`}
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800 bg-slate-950 py-4 px-4 text-center text-xs text-slate-500">
-        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.11 Baseline
+      <footer className="border-t border-slate-800/80 bg-slate-900/40 py-4 text-center text-xs text-slate-500">
+        AGILA Hub Android &bull; The Fraternal Order of Eagles &bull; Bantayog Elite Eagles Club &bull; Phase 01 Foundation Verified
       </footer>
     </div>
   );

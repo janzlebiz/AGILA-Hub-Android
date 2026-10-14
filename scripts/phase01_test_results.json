@@ -1,0 +1,415 @@
+[
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-INV-01",
+    "name": "Migrations Directory Exists",
+    "status": "PASS",
+    "evidence": "Found /app/applet/supabase/migrations"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-01",
+    "name": "Migration File 20261013000001_core_types_and_extensions.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 2120 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-02",
+    "name": "Migration File 20261013000002_members_and_directory.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 6160 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-03",
+    "name": "Migration File 20261013000003_invitations_and_auth.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 3074 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-04",
+    "name": "Migration File 20261013000004_eagles_id_storage.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 5711 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-05",
+    "name": "Migration File 20261013000005_announcements_and_attendance.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 5691 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-06",
+    "name": "Migration File 20261013000006_financial_records.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 14838 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-07",
+    "name": "Migration File 20261013000007_constitution_rag.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 3171 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-08",
+    "name": "Migration File 20261013000008_audit_logs_and_triggers.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 10820 bytes"
+  },
+  {
+    "suite": "Migration Inventory",
+    "id": "MIG-FILE-09",
+    "name": "Migration File 20261013000009_rls_and_storage_policies.sql",
+    "status": "PASS",
+    "evidence": "File exists with size 12387 bytes"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-MEMBERS",
+    "name": "Table public.members Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.members"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-MEMBER_INVITATIONS",
+    "name": "Table public.member_invitations Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.member_invitations"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-EAGLES_ID_CARDS",
+    "name": "Table public.eagles_id_cards Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.eagles_id_cards"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-ANNOUNCEMENTS",
+    "name": "Table public.announcements Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.announcements"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-ATTENDANCE_EVENTS",
+    "name": "Table public.attendance_events Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.attendance_events"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-ATTENDANCE_RECORDS",
+    "name": "Table public.attendance_records Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.attendance_records"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-CONTRIBUTIONS",
+    "name": "Table public.contributions Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.contributions"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-EXPENSES",
+    "name": "Table public.expenses Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.expenses"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-CONSTITUTION_VERSIONS",
+    "name": "Table public.constitution_versions Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.constitution_versions"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-CONSTITUTION_SECTIONS",
+    "name": "Table public.constitution_sections Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.constitution_sections"
+  },
+  {
+    "suite": "Schema Definitions",
+    "id": "TBL-AUDIT_LOGS",
+    "name": "Table public.audit_logs Defined",
+    "status": "PASS",
+    "evidence": "Matched DDL declaration for public.audit_logs"
+  },
+  {
+    "suite": "Extensions",
+    "id": "EXT-UUID-OSSP",
+    "name": "Extension uuid-ossp Declared",
+    "status": "PASS",
+    "evidence": "Matched extension creation for uuid-ossp"
+  },
+  {
+    "suite": "Extensions",
+    "id": "EXT-PGCRYPTO",
+    "name": "Extension pgcrypto Declared",
+    "status": "PASS",
+    "evidence": "Matched extension creation for pgcrypto"
+  },
+  {
+    "suite": "Extensions",
+    "id": "EXT-VECTOR",
+    "name": "Extension vector Declared",
+    "status": "PASS",
+    "evidence": "Matched extension creation for vector"
+  },
+  {
+    "suite": "Security & Remediation",
+    "id": "REM-01-EXP-CAT",
+    "name": "Expense Audit Sourced from v_raw_new->category",
+    "status": "PASS",
+    "evidence": "v_safe_new accurately references v_raw_new->category"
+  },
+  {
+    "suite": "Security & Remediation",
+    "id": "REM-01-ACTOR-TYPE",
+    "name": "audit_logs.actor_type Declared as VARCHAR(50)",
+    "status": "PASS",
+    "evidence": "Matched VARCHAR(50) actor_type column definition"
+  },
+  {
+    "suite": "Index Verification",
+    "id": "REM-02-EMAIL-IDX",
+    "name": "idx_members_email_lower UNIQUE on LOWER(email)",
+    "status": "PASS",
+    "evidence": "Matched CREATE UNIQUE INDEX on LOWER(email)"
+  },
+  {
+    "suite": "Index Verification",
+    "id": "REM-02-PAY-UQ",
+    "name": "uq_reference_payment UNIQUE on (payment_channel, reference_number)",
+    "status": "PASS",
+    "evidence": "Matched UNIQUE constraint on contributions"
+  },
+  {
+    "suite": "Index Verification",
+    "id": "REM-02-HNSW-IDX",
+    "name": "idx_constitution_embedding_hnsw on embedding with vector_cosine_ops",
+    "status": "PASS",
+    "evidence": "Matched HNSW cosine similarity index on public.constitution_sections"
+  },
+  {
+    "suite": "Financial Governance",
+    "id": "REM-03-EXP-COLS",
+    "name": "Expense Reversal Columns Present",
+    "status": "PASS",
+    "evidence": "Distinct reversed_by, reversed_at, reversal_reason columns found"
+  },
+  {
+    "suite": "Financial Governance",
+    "id": "REM-03-EXP-PRESERVE",
+    "name": "Original Approval Preserved on Reversal",
+    "status": "PASS",
+    "evidence": "validate_expense_mutation retains OLD.approved_by/at during voiding/reversal"
+  },
+  {
+    "suite": "Financial Governance",
+    "id": "REM-04-CON-COLS",
+    "name": "Contribution Closing Columns Present",
+    "status": "PASS",
+    "evidence": "Distinct closed_by, closed_at, void_reason columns found"
+  },
+  {
+    "suite": "Financial Governance",
+    "id": "REM-04-CON-PRESERVE",
+    "name": "Original Verification Preserved on Void/Adjust",
+    "status": "PASS",
+    "evidence": "protect_payment_state_transitions retains OLD.verified_by/at during voiding/adjustment"
+  },
+  {
+    "suite": "RAG Governance",
+    "id": "RAG-FLOOR-068",
+    "name": "Server Enforces Minimum 0.68 Similarity Floor",
+    "status": "PASS",
+    "evidence": "match_constitution_sections clamps threshold with GREATEST(0.68, ...)"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-MEMBERS",
+    "name": "RLS Enabled on public.members",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.members ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-MEMBER_INVITATIONS",
+    "name": "RLS Enabled on public.member_invitations",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.member_invitations ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-EAGLES_ID_CARDS",
+    "name": "RLS Enabled on public.eagles_id_cards",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.eagles_id_cards ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-ANNOUNCEMENTS",
+    "name": "RLS Enabled on public.announcements",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-ATTENDANCE_EVENTS",
+    "name": "RLS Enabled on public.attendance_events",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.attendance_events ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-ATTENDANCE_RECORDS",
+    "name": "RLS Enabled on public.attendance_records",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.attendance_records ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-CONTRIBUTIONS",
+    "name": "RLS Enabled on public.contributions",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.contributions ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-EXPENSES",
+    "name": "RLS Enabled on public.expenses",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-CONSTITUTION_VERSIONS",
+    "name": "RLS Enabled on public.constitution_versions",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.constitution_versions ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-CONSTITUTION_SECTIONS",
+    "name": "RLS Enabled on public.constitution_sections",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.constitution_sections ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "RLS Policies",
+    "id": "RLS-AUDIT_LOGS",
+    "name": "RLS Enabled on public.audit_logs",
+    "status": "PASS",
+    "evidence": "Found ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY"
+  },
+  {
+    "suite": "Preflight Script",
+    "id": "PRE-FILE-01",
+    "name": "scripts/preflight_schema_check.sql Exists",
+    "status": "PASS",
+    "evidence": "Found /app/applet/scripts/preflight_schema_check.sql"
+  },
+  {
+    "suite": "Preflight Script",
+    "id": "PRE-ACTOR-TYPE",
+    "name": "Preflight Checks actor_type varchar(50)",
+    "status": "PASS",
+    "evidence": "Verified information_schema checks data_type character varying with max length 50"
+  },
+  {
+    "suite": "Preflight Script",
+    "id": "PRE-EMAIL-IDX",
+    "name": "Preflight Validates idx_members_email_lower Uniqueness & Expression",
+    "status": "PASS",
+    "evidence": "Verified indisunique = TRUE and LOWER(email) expression match"
+  },
+  {
+    "suite": "Preflight Script",
+    "id": "PRE-HNSW-IDX",
+    "name": "Preflight Validates idx_constitution_embedding_hnsw Access Method & Column",
+    "status": "PASS",
+    "evidence": "Verified HNSW index assertion on embedding vector_cosine_ops"
+  },
+  {
+    "suite": "Preflight Script",
+    "id": "PRE-RLS-CHECK",
+    "name": "Preflight Validates Active RLS on ALL Public Tables",
+    "status": "PASS",
+    "evidence": "Verified pg_tables iteration fails closed if rowsecurity is false"
+  },
+  {
+    "suite": "Restore Runbook",
+    "id": "RESTORE-FILE-01",
+    "name": "scripts/restore_database.sh Exists",
+    "status": "PASS",
+    "evidence": "Found /app/applet/scripts/restore_database.sh"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-01",
+    "name": "Negative Fixture 1: Missing TARGET_ENV Fails Fast",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: TARGET_ENV is unset or empty"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-02",
+    "name": "Negative Fixture 2: TARGET_ENV=production Blocked",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: Production restores are blocked"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-03",
+    "name": "Negative Fixture 3: Missing TARGET_PROJECT_ID Fails Fast",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: TARGET_PROJECT_ID is unset"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-04",
+    "name": "Negative Fixture 4: Missing PROD_PROJECT_ID Fails Fast",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: PROD_PROJECT_ID is unset"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-05",
+    "name": "Negative Fixture 5: Missing PROD_DB_HOST Fails Fast",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: PROD_DB_HOST is unset"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-06",
+    "name": "Negative Fixture 6: Target Project == Prod Project Blocked",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: Production restores are strictly forbidden"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-07",
+    "name": "Negative Fixture 7: Hostname / Project-ID Mismatch Blocked",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: Authoritative target identity verification failed"
+  },
+  {
+    "suite": "Restore Safety Guards",
+    "id": "RESTORE-NEG-08",
+    "name": "Negative Fixture 8: Target Host == Prod Host Blocked",
+    "status": "PASS",
+    "evidence": "Exited with code 1, message: matches trusted production endpoint"
+  }
+]
