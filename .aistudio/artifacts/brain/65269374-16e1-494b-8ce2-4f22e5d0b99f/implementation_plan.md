@@ -1,6 +1,6 @@
 # AGILA Hub Android — Master Architecture & Phase 01 Implementation Plan
-**Document Version:** Revision 4.0 (Phase 01 Implementation & Foundation Verification Complete)  
-**Status:** Phase 01 Scope Implemented on Disk; 59/59 Automated Tests Verified (Release Gate 01 Passed)  
+**Document Version:** Revision 4.1 (Phase 01 Verification Remediation Complete)  
+**Status:** Phase 01 Scope Implemented on Disk; 70/70 Automated Tests Verified (Release Gate 01 Passed)  
 **Target Platform:** Android (React Native + Expo SDK 52+ + TypeScript)  
 **Backend:** Supabase (PostgreSQL 16, GoTrue Auth, Storage, Edge Functions, pgvector)  
 **Web Admin:** React (Vite / Next.js) on Vercel *(Desktop Administration Only — NOT an Android Builder)*  
@@ -19,7 +19,7 @@ AGILA Hub Android is an independent, native mobile platform for The Fraternal Or
 4. **Account & Registration Governance:** Invitation-only activation. Public self-registration is permanently disabled at the Supabase Auth gateway. Administrators create canonical member records, and prospective users activate their accounts via single-use cryptographic invitation tokens.
 5. **Financial Recording Scope:** The platform records payments conducted externally (cash, bank transfer, e-wallets) with text-only reference numbers. **Strictly zero payment gateways, online checkouts, or receipt-file uploads are required or implemented.**
 6. **Constitution RAG Governance:** Semantic retrieval over chunked TFOE-PE constitutional text stored in `pgvector` (`vector(768)`). The assistant answers solely with citations (Chapter, Article, Section) and abstains when evidence is missing or below the server-enforced minimum similarity threshold ($0.68$).
-7. **Phase 01 Execution & Governance Guard:** **Phase 01 core database migrations (`001` through `009`), preflight validation script (`scripts/preflight_schema_check.sql`), and restore database runbook (`scripts/restore_database.sh`) have been materialized on disk. 59 automated test assertions in `scripts/verify_phase01.ts` have been executed with 100% PASS.** No production infrastructure provisioning or live cloud database migrations were executed during Phase 01 in accordance with operational safeguards. All cloud runtime acceptance tests remain marked NOT EXECUTED for their designated cloud release gates.
+7. **Phase 01 Execution & Governance Guard:** **Phase 01 core database migrations (`001` through `009`), preflight validation script (`scripts/preflight_schema_check.sql`), and restore database runbook (`scripts/restore_database.sh`) have been materialized on disk. 70 automated test assertions in `scripts/verify_phase01.ts` have been executed with 100% PASS, including complete environment isolation for negative restore fixtures and PostgreSQL AST syntax validation across all migrations.** No production infrastructure provisioning or live cloud database migrations were executed during Phase 01 in accordance with operational safeguards. All cloud runtime acceptance tests remain marked NOT EXECUTED for their designated cloud release gates.
 
 ---
 
@@ -2141,7 +2141,7 @@ BEGIN
         v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_constitution_embedding_hnsw (HNSW on embedding with vector_cosine_ops)');
     END IF;
 
-    -- 7. Check Active Row Level Security on ALL 10 Public Tables
+    -- 7. Check Active Row Level Security on ALL 11 Public Tables
     FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
         IF EXISTS (
             SELECT 1 FROM pg_tables 
@@ -2171,14 +2171,14 @@ END $$;
 | **P1-01** | Audit privacy & actor attribution | Strict per-table allowlist with zero fallback leakage; trusted server actor attribution; regression fix on `expenses.new_data.category` | `008_audit_logs_and_triggers.sql` | **Pos 1:** Member mutation records allowlisted attributes only.<br>**Pos 2 (Regression Test):** Insert expense record (`category = 'venue_rental'`); verify audit log `new_data->>'category' = 'venue_rental'` is captured correctly and non-null.<br>**Neg:** Check audit log on ID cards (paths absent); check invitations (`token_hash` absent); check unallowlisted column exclusion. | Audit Gate | **NOT EXECUTED** *(Scheduled for Audit Gate)* |
 | **P1-02** | Attendance verification integrity | Server-controlled trigger binds `verified_by := v_caller.member_id` | `005_announcements_and_attendance.sql` | **Pos:** Officer marks attendance; verified_by set to Officer ID.<br>**Neg:** Officer passes third-party UUID as verified_by; verify server overrides with caller ID. | Attendance Gate | **NOT EXECUTED** *(Scheduled for Attendance Gate)* |
 | **P1-03** | Validated backup/restore runbook & automated assertions | Multi-layer target guard: mandatory explicit `TARGET_ENV` (fail fast if unset or not staging/development); authoritative target identity and project-to-endpoint mapping (`TARGET_DB_HOST` matches `db.${TARGET_PROJECT_ID}.supabase.co`); `TARGET_PROJECT_ID` distinct from production; direct `TARGET_HOST` vs `PROD_DB_HOST` comparison; secondary defense-in-depth fail-closed DNS resolution comparing complete normalized IP sets via `comm -12`; fail-fast `set -euo pipefail`; single transaction; topological FK order; exhaustive automated PL/pgSQL invariant assertions covering all member references and all public tables | Section 7.2 of plan, `scripts/restore_database.sh` | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity across all member references (recorded, approved, reversed, verified, closed), financial invariants, and RLS on all public tables.<br>**Neg 1 (Missing TARGET_ENV):** Pass unset or empty `TARGET_ENV`; verify script halts immediately before connection with code 1.<br>**Neg 2 (Disallowed ENV):** Pass `TARGET_ENV=production`; verify script halts immediately before connection with code 1.<br>**Neg 3 (Host/Project Mismatch):** Pass declared project ID with mismatched target host; verify script aborts before connection with code 1.<br>**Neg 4 (Identical Project ID):** Pass `TARGET_PROJECT_ID=PROD_PROJECT_ID`; verify script halts immediately.<br>**Neg 5 (Direct Endpoint Match):** Pass `TARGET_DB_HOST=PROD_DB_HOST`; verify script halts immediately.<br>**Neg 6 (DNS Resolution Failure):** Target or production host fails DNS resolution; verify script fails closed immediately.<br>**Neg 7 (IP Address Overlap):** Target and prod hosts share IP in normalized sets; verify script halts immediately.<br>**Neg 8 (Corrupted Archive):** Pass corrupted archive; verify clean atomic rollback.<br>**Neg 9 (Orphan FK):** Backup contains orphan approved_by or reversed_by; verify post-restore assertion aborts and fails pipeline.<br>**Neg 10 (Disabled RLS):** Public table has RLS disabled; verify post-restore assertion aborts and fails pipeline. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
-| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (10), columns/types (`audit_logs.actor_type varchar(50)`), triggers (6), security functions (3), index uniqueness (`idx_members_email_lower` `indisunique = true` on `LOWER(email)`), constraint uniqueness (`uq_reference_payment`), HNSW embedding index (`idx_constitution_embedding_hnsw` on `embedding` with `vector_cosine_ops`), and active RLS on all 10 tables | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline, asserting column types, index uniqueness, and indexed expressions.<br>**Neg 1:** Drop table, column, trigger, or index/constraint; verify script raises fatal validation exception.<br>**Neg 2:** Recreate email index without uniqueness or without `LOWER(email)`; verify script raises fatal validation exception.<br>**Neg 3:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
+| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (11, including `public.constitution_versions`), columns/types (`audit_logs.actor_type varchar(50)`), triggers (6), security functions (3), index uniqueness (`idx_members_email_lower` `indisunique = true` on `LOWER(email)`), constraint uniqueness (`uq_reference_payment`), HNSW embedding index (`idx_constitution_embedding_hnsw` on `embedding` with `vector_cosine_ops`), and active RLS on all 11 tables | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline, asserting column types, index uniqueness, and indexed expressions.<br>**Neg 1:** Drop table, column, trigger, or index/constraint; verify script raises fatal validation exception.<br>**Neg 2:** Recreate email index without uniqueness or without `LOWER(email)`; verify script raises fatal validation exception.<br>**Neg 3:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
 | **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate | **NOT EXECUTED** *(Scheduled for RAG Gate)* |
 
 ---
 
 ## 10. Mandatory Testable Release Gates
 
-1. **Schema Gate:** **PHASE 01 COMPLETED & VERIFIED (STATIC/CONTRACT PASS).** All 9 migrations (`001` through `009`) are materialized on disk in `supabase/migrations/` (total 63,972 bytes). `scripts/preflight_schema_check.sql` and `scripts/restore_database.sh` are materialized and verified. 59 automated test assertions in `scripts/verify_phase01.ts` pass cleanly (100%). Live cloud `supabase db push` execution is scheduled upon provisioning in Phase 02.
+1. **Schema Gate:** **PHASE 01 COMPLETED & VERIFIED (STATIC/CONTRACT PASS).** All 9 migrations (`001` through `009`) are materialized on disk in `supabase/migrations/` (total 63,972 bytes). `scripts/preflight_schema_check.sql` and `scripts/restore_database.sh` are materialized and verified. 70 automated test assertions in `scripts/verify_phase01.ts` pass cleanly (100%), including complete environment isolation for negative restore fixtures and PostgreSQL AST syntax validation across all migrations. Live cloud `supabase db push` execution is scheduled upon provisioning in Phase 02.
 2. **Authorization Gate:** 100% pass on matrix testing across all 5 roles. Proves zero unauthorized row reads on private tables and expenses. *(Status: NOT EXECUTED - Scheduled for Cloud Auth Gate)*
 3. **Account-State Gate:** Proves accounts in `PENDING_INVITATION`, `INVITED`, `SUSPENDED`, and `DEACTIVATED` states cannot access protected endpoints. *(Status: NOT EXECUTED - Scheduled for Cloud Gate)*
 4. **Privilege Gate:** Proves non-admins cannot alter protected columns (`role`, `status`, names, chapter) or exploit `SECURITY DEFINER` functions; proves client-supplied identities are ignored. *(Status: NOT EXECUTED - Scheduled for Cloud Gate)*
@@ -2196,7 +2196,7 @@ END $$;
 ## 11. Final Acceptance Status & Human Prerequisites
 
 ### 11.1 Remediation Summary
-All technical architecture, database migrations, security policies, identity triggers, preflight checks, and backup runbooks have been implemented on disk and validated via 59 automated test assertions with zero failures.
+All technical architecture, database migrations, security policies, identity triggers, preflight checks, and backup runbooks have been implemented on disk and validated via 70 automated test assertions with zero failures.
 
 ### 11.2 Prerequisites Requiring Human Action Prior to Live Cloud Provisioning (Phase 02)
 1. **Designation of Root Super-Admin Email:** Confirmation of the email address to receive initial bootstrap privileges.
@@ -2215,8 +2215,8 @@ All technical architecture, database migrations, security policies, identity tri
   - `20261013000008_audit_logs_and_triggers.sql` (10,820 bytes)
   - `20261013000009_rls_and_storage_policies.sql` (12,387 bytes)
 - **Validation Scripts on Disk (`scripts/`):**
-  - `scripts/preflight_schema_check.sql` (machine-verifiable PL/pgSQL assertions)
+  - `scripts/preflight_schema_check.sql` (machine-verifiable PL/pgSQL assertions across 11 tables)
   - `scripts/restore_database.sh` (hardened transaction-safe restore runbook)
-  - `scripts/verify_phase01.ts` (Phase 01 test runner executing 59 assertions)
-- **Execution Evidence:** 59 assertions executed (`npm test`), 59 PASS, 0 FAIL.
+  - `scripts/verify_phase01.ts` (Phase 01 test runner executing 70 assertions with isolated negative fixtures & AST parsing)
+- **Execution Evidence:** 70 assertions executed (`npm test`), 70 PASS, 0 FAIL.
 - **Runtime Cloud Database Tests:** Marked **NOT EXECUTED** pending cloud provisioning.

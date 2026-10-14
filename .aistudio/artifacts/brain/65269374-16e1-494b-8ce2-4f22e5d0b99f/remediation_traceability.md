@@ -1,4 +1,4 @@
-# AGILA Hub Android — Phase 01 Remediation Traceability Matrix (Revision 4.0)
+# AGILA Hub Android — Phase 01 Remediation Traceability Matrix (Revision 4.1)
 **Document:** Phase 01 Remediation Traceability (`remediation_traceability.md`)  
 **Status:** Phase 01 Implementation & Foundation Verification COMPLETE (Release Gate 01 Passed)  
 **Scope:** Reconciled against Migrations 001 through 009 on disk, `scripts/preflight_schema_check.sql`, `scripts/restore_database.sh`, and `scripts/verify_phase01.ts`.
@@ -29,6 +29,7 @@
 *   **Defect & Impact:**
     1. Previous preflight script checked `audit_logs.actor_type` as `data_type = 'text'`, which fails on PostgreSQL databases created from Migration 008 declaring `actor_type VARCHAR(50)` (`data_type = 'character varying'`).
     2. Index assertions checked expressions by text search without validating index uniqueness on `idx_members_email_lower` or verifying that `idx_constitution_embedding_hnsw` specifically belongs to `public.constitution_sections`, uses the HNSW access method, and indexes the `embedding` column with `vector_cosine_ops`.
+    3. `public.constitution_versions` table was omitted from the preflight table-presence check and RLS check array, leaving it unchecked despite being declared in Migration 007 and protected by RLS in Migration 009.
 *   **Source Location:** Section 8.1 of `implementation_plan.md` and `scripts/preflight_schema_check.sql`
 *   **Corrected SQL & Control:**
     - Aligned `audit_logs.actor_type` check with Migration 008 definition: asserts `data_type = 'character varying'` and `character_maximum_length = 50`.
@@ -38,18 +39,19 @@
       - `idx_constitution_embedding_hnsw`: asserts index on `public.constitution_sections`, HNSW method (`indexdef ILIKE '%hnsw%'`), and explicit indexing of the `embedding` column with `vector_cosine_ops` (`indexdef ILIKE '%(embedding%vector_cosine_ops)%'`).
     - Validates complete baseline:
       - **3 Required Extensions:** `uuid-ossp`, `pgcrypto`, `vector`.
-      - **All 10 Core Baseline Tables:** `members`, `member_invitations`, `eagles_id_cards`, `announcements`, `attendance_events`, `attendance_records`, `contributions`, `expenses`, `constitution_sections`, `audit_logs`.
+      - **All 11 Core Baseline Tables:** `members`, `member_invitations`, `eagles_id_cards`, `announcements`, `attendance_events`, `attendance_records`, `contributions`, `expenses`, `constitution_versions`, `constitution_sections`, `audit_logs`.
       - **Critical Columns & Types:** `members.auth_user_id (uuid)`, `contributions.closed_by (uuid)`, `expenses.reversed_by (uuid)`, `audit_logs.actor_type (varchar(50))`, `constitution_sections.embedding`.
       - **6 Critical Integrity Triggers:** `trg_validate_expense_mutation`, `trg_protect_payment_transitions`, `trg_protect_member_columns`, `trg_validate_attendance_record_mutation`, `trg_audit_expenses`, `trg_audit_members`.
       - **3 Critical Security Functions:** `public.get_caller_auth`, `public.match_constitution_sections`, `public.process_audit_log_capture`.
-      - **Active Row Level Security:** Asserts `rowsecurity = TRUE` across ALL 10 public tables.
+      - **Active Row Level Security:** Asserts `rowsecurity = TRUE` across ALL 11 public tables in `pg_tables`.
     - Script fails closed: raises fatal SQL exception (`RAISE EXCEPTION`) listing all missing items if any assertion fails.
 *   **Phase 01 Automated Test Verification:**
     - `PRE-FILE-01`: Asserts `scripts/preflight_schema_check.sql` exists on disk (PASS).
+    - `PRE-TBL-CONST-VERSIONS`: Asserts `v_expected_tables` includes `constitution_versions` and `constitution_sections` (PASS).
     - `PRE-ACTOR-TYPE`: Asserts preflight checks `actor_type varchar(50)` (PASS).
     - `PRE-EMAIL-IDX`: Asserts preflight validates `idx_members_email_lower` `indisunique = TRUE` and `LOWER(email)` (PASS).
     - `PRE-HNSW-IDX`: Asserts preflight validates `idx_constitution_embedding_hnsw` on `embedding vector_cosine_ops` (PASS).
-    - `PRE-RLS-CHECK`: Asserts preflight checks `rowsecurity = TRUE` on all public tables (PASS).
+    - `PRE-RLS-CHECK`: Asserts preflight checks `rowsecurity = TRUE` on all 11 public tables (PASS).
 *   **Execution Status:** Script materialized on disk and contract verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR SCHEMA RELEASE GATE)**.
 
 ---
@@ -114,8 +116,9 @@
       - Verifies referential integrity across ALL member references in `expenses` (`recorded_by`, `approved_by`, `reversed_by`).
       - Verifies referential integrity across ALL member references in `contributions` (`member_id`, `recorded_by`, `verified_by`, `closed_by`).
       - Verifies referential integrity for `attendance_records` (`event_id`, `member_id`).
-      - Verifies financial state invariants and active RLS (`rowsecurity = TRUE`) across **ALL public tables** in `pg_tables`.
-*   **Phase 01 Automated Negative Fixture Execution Results:**
+      - Verifies financial state invariants and active RLS (`rowsecurity = TRUE`) across **ALL 11 public tables** in `pg_tables`.
+*   **Phase 01 Automated Negative Fixture Execution Results (Isolated Environment):**
+    - Every fixture executed using `env -i` with complete isolation from outer environment variables:
     - `RESTORE-NEG-01`: Missing `TARGET_ENV` -> aborted immediately with code 1 (`FATAL: TARGET_ENV is unset or empty`) (PASS).
     - `RESTORE-NEG-02`: `TARGET_ENV=production` -> aborted immediately with code 1 (`Production restores are blocked`) (PASS).
     - `RESTORE-NEG-03`: Missing `TARGET_PROJECT_ID` -> aborted immediately with code 1 (PASS).
@@ -124,7 +127,7 @@
     - `RESTORE-NEG-06`: Target Project == Prod Project -> aborted immediately with code 1 (`Production restores are strictly forbidden`) (PASS).
     - `RESTORE-NEG-07`: Hostname / Project-ID Mismatch -> aborted immediately with code 1 (`Authoritative target identity verification failed`) (PASS).
     - `RESTORE-NEG-08`: Target Host == Prod Host -> aborted immediately with code 1 (`matches trusted production endpoint`) (PASS).
-*   **Execution Status:** Script materialized on disk, 8 negative fixtures executed and passed. Live restore drill: **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE IN PHASE 07)**.
+*   **Execution Status:** Script materialized on disk, 8 isolated negative fixtures executed and passed. Live restore drill: **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE IN PHASE 07)**.
 
 ---
 
@@ -135,7 +138,8 @@
 | **Migration Inventory** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (fs inspection) |
 | **Schema Definitions & Types** | 14 | 14 | 0 | `scripts/verify_phase01.ts` (DDL inspection) |
 | **Architectural Remediations** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (AST/Regex assertions) |
-| **RLS Policy Coverage** | 11 | 11 | 0 | `scripts/verify_phase01.ts` (DDL assertions) |
-| **Preflight Script Parity** | 5 | 5 | 0 | `scripts/verify_phase01.ts` (SQL contract analysis) |
-| **Restore Runbook Negative Fixtures** | 9 | 9 | 0 | `scripts/verify_phase01.ts` (isolated subshell execution) |
-| **TOTAL** | **59** | **59** | **0** | **100% Pass Rate** |
+| **RLS Policy Coverage** | 11 | 11 | 0 | `scripts/verify_phase01.ts` (DDL assertions across all 11 tables) |
+| **Preflight Script Parity** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (SQL contract analysis including `constitution_versions`) |
+| **Restore Runbook Negative Fixtures** | 9 | 9 | 0 | `scripts/verify_phase01.ts` (`env -i` isolated subshell execution) |
+| **SQL Syntax Validation** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (PostgreSQL `libpg_query` AST parser) |
+| **TOTAL** | **70** | **70** | **0** | **100% Pass Rate** |

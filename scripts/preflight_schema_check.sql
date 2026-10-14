@@ -1,6 +1,6 @@
 -- File: scripts/preflight_schema_check.sql
 -- AGILA Hub Android — Phase 01 Schema Gate Preflight Validation Script
--- Validates: 3 extensions, 10 core tables, critical columns/types, triggers, functions, indexes, and active RLS
+-- Validates: 3 extensions, 11 core tables, critical columns/types, triggers, functions, indexes, and active RLS
 
 DO $$
 DECLARE
@@ -9,7 +9,7 @@ DECLARE
     v_expected_tables TEXT[] := ARRAY[
         'members', 'member_invitations', 'eagles_id_cards', 'announcements', 
         'attendance_events', 'attendance_records', 'contributions', 'expenses', 
-        'constitution_sections', 'audit_logs'
+        'constitution_versions', 'constitution_sections', 'audit_logs'
     ];
 BEGIN
     -- 1. Check Required Extensions
@@ -23,7 +23,7 @@ BEGIN
         v_missing_items := array_append(v_missing_items, 'Extension: uuid-ossp');
     END IF;
 
-    -- 2. Check All 10 Baseline Core Tables
+    -- 2. Check All 11 Baseline Core Tables
     FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
         IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = v_expected_table) THEN
             v_missing_items := array_append(v_missing_items, 'Table: public.' || v_expected_table);
@@ -152,7 +152,7 @@ BEGIN
         v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_constitution_embedding_hnsw (HNSW on embedding with vector_cosine_ops)');
     END IF;
 
-    -- 7. Check Active Row Level Security on ALL 10 Public Tables
+    -- 7. Check Active Row Level Security on ALL 11 Public Tables
     FOREACH v_expected_table IN ARRAY v_expected_tables LOOP
         IF EXISTS (
             SELECT 1 FROM pg_tables 
@@ -166,5 +166,5 @@ BEGIN
         RAISE EXCEPTION 'PREFLIGHT VALIDATION FAILED: Missing baseline objects: %', array_to_string(v_missing_items, ', ');
     END IF;
 
-    RAISE NOTICE 'PREFLIGHT VALIDATION PASSED: All 10 tables, 3 extensions, columns, triggers, functions, unique/HNSW indexes, and active RLS verified successfully.';
+    RAISE NOTICE 'PREFLIGHT VALIDATION PASSED: All 11 tables, 3 extensions, columns, triggers, functions, unique/HNSW indexes, and active RLS verified successfully.';
 END $$;

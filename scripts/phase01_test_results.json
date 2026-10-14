@@ -323,6 +323,13 @@
   },
   {
     "suite": "Preflight Script",
+    "id": "PRE-TBL-CONST-VERSIONS",
+    "name": "Preflight Checks public.constitution_versions Presence & RLS",
+    "status": "PASS",
+    "evidence": "Verified v_expected_tables includes constitution_versions and constitution_sections"
+  },
+  {
+    "suite": "Preflight Script",
     "id": "PRE-ACTOR-TYPE",
     "name": "Preflight Checks actor_type varchar(50)",
     "status": "PASS",
@@ -345,9 +352,9 @@
   {
     "suite": "Preflight Script",
     "id": "PRE-RLS-CHECK",
-    "name": "Preflight Validates Active RLS on ALL Public Tables",
+    "name": "Preflight Validates Active RLS on ALL 11 Public Tables",
     "status": "PASS",
-    "evidence": "Verified pg_tables iteration fails closed if rowsecurity is false"
+    "evidence": "Verified pg_tables iteration fails closed if rowsecurity is false across all 11 core tables"
   },
   {
     "suite": "Restore Runbook",
@@ -411,5 +418,75 @@
     "name": "Negative Fixture 8: Target Host == Prod Host Blocked",
     "status": "PASS",
     "evidence": "Exited with code 1, message: matches trusted production endpoint"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_CORE_T",
+    "name": "Migration 20261013000001_core_types_and_extensions.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 11 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_MEMBER",
+    "name": "Migration 20261013000002_members_and_directory.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 16 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_INVITA",
+    "name": "Migration 20261013000003_invitations_and_auth.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 7 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_EAGLES",
+    "name": "Migration 20261013000004_eagles_id_storage.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 8 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_ANNOUN",
+    "name": "Migration 20261013000005_announcements_and_attendance.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 14 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_FINANC",
+    "name": "Migration 20261013000006_financial_records.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 13 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_CONSTI",
+    "name": "Migration 20261013000007_constitution_rag.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 7 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_AUDIT_",
+    "name": "Migration 20261013000008_audit_logs_and_triggers.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 23 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-_RLS_AN",
+    "name": "Migration 20261013000009_rls_and_storage_policies.sql Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 82 AST statement(s) with zero syntax errors via libpg_query"
+  },
+  {
+    "suite": "SQL Syntax Validation",
+    "id": "SYNTAX-PREFLIGHT",
+    "name": "Preflight Script Validates PostgreSQL AST Syntax",
+    "status": "PASS",
+    "evidence": "Parsed 1 DO-block statement with zero syntax errors via libpg_query"
   }
 ]

@@ -1,5 +1,5 @@
 {
-  "summary": "AGILA Hub Android Remediation Traceability Matrix updated to Revision 4.0 for Phase 01 Implementation. Maps all architectural remediations (REM-01 to REM-05) to actual migration files on disk, preflight check script, and 59 automated test assertions from scripts/verify_phase01.ts with 100% pass rate. Confirms unexecuted runtime cloud tests remain NOT EXECUTED.",
-  "updatedAt": "2026-10-14T05:11:21.723616218Z",
+  "summary": "AGILA Hub Android Remediation Traceability Matrix updated to Revision 4.1: details 11 core tables including public.constitution_versions, isolated restore fixtures under env -i, PostgreSQL AST syntax validation suite, and 70/70 automated assertions.",
+  "updatedAt": "2026-10-14T05:30:01.382852635Z",
   "userFacing": true
 }
