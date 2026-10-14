@@ -1,6 +1,6 @@
 {
-  "summary": "AGILA Hub Android — Phase 00 Remediation Traceability Matrix, Revision 3.8. Reconciles schema-aligned preflight index checks (idx_members_email_lower, uq_reference_payment), independent production endpoint verification against PROD_DB_HOST, and exhaustive post-restore assertions covering all member references and active RLS on all public tables.",
-  "updatedAt": "2026-10-13T21:07:00.000000000Z",
+  "summary": "AGILA Hub Android — Phase 00 Remediation Traceability Matrix, Revision 3.10. Reconciles schema-aligned preflight index checks (idx_constitution_embedding_hnsw on public.constitution_sections, idx_members_email_lower, uq_reference_payment), authoritative production endpoint verification with secondary DNS/IP overlap defense-in-depth, and exhaustive post-restore assertions covering all member references and active RLS on all public tables.",
+  "updatedAt": "2026-10-13T21:30:00.000000000Z",
   "requestFeedback": false,
   "userFacing": true
 }

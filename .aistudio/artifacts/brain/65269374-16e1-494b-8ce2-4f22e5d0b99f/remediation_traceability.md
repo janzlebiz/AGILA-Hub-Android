@@ -1,4 +1,4 @@
-# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.9)
+# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.10)
 **Document:** Final Phase 00 Remediation Traceability (`remediation_traceability.md`)  
 **Status:** Implementation-Ready Planning Traceability (Awaiting Stakeholder Approval)  
 **Scope:** Reconciled against Migrations 001 through 009, Preflight Checks, and Operational Procedures
@@ -30,14 +30,14 @@
 ### 2. Preflight Completeness: Type-Aligned & Uniqueness-Verified Schema Assertions
 *   **Defect & Impact:**
     1. Previous preflight script checked `audit_logs.actor_type` as `data_type = 'text'`, which fails on PostgreSQL databases created from Migration 008 declaring `actor_type VARCHAR(50)` (`data_type = 'character varying'`).
-    2. Index assertions checked expressions by text search without validating index uniqueness on `idx_members_email_lower` or verifying that `idx_sections_embedding` specifically indexes the `embedding` column.
+    2. Index assertions checked expressions by text search without validating index uniqueness on `idx_members_email_lower` or verifying that `idx_constitution_embedding_hnsw` specifically belongs to `public.constitution_sections`, uses the HNSW access method, and indexes the `embedding` column with `vector_cosine_ops`.
 *   **Source Location:** Section 8.1 of `implementation_plan.md` and `scripts/preflight_schema_check.sql`
 *   **Corrected SQL & Control:**
     - Aligned `audit_logs.actor_type` check with Migration 008 definition: asserts `data_type = 'character varying'` and `character_maximum_length = 50`.
     - Hardened index assertions to validate security- and integrity-relevant properties:
       - `idx_members_email_lower`: joins `pg_index` to assert `indisunique = TRUE` in addition to `indexdef ILIKE '%lower(%email%)%'`.
       - `uq_reference_payment`: asserts unique constraint in `pg_constraint (contype = 'u')` and unique index in `pg_index (indisunique = TRUE)` covering `(payment_channel, reference_number)`.
-      - `idx_sections_embedding`: asserts HNSW method (`indexdef ILIKE '%hnsw%'`) and explicit indexing of the `embedding` column with `vector_cosine_ops` (`indexdef ILIKE '%(embedding%vector_cosine_ops)%'`).
+      - `idx_constitution_embedding_hnsw`: asserts index on `public.constitution_sections`, HNSW method (`indexdef ILIKE '%hnsw%'`), and explicit indexing of the `embedding` column with `vector_cosine_ops` (`indexdef ILIKE '%(embedding%vector_cosine_ops)%'`).
     - Validates complete baseline:
       - **3 Required Extensions:** `uuid-ossp`, `pgcrypto`, `vector`.
       - **All 10 Core Baseline Tables:** `members`, `member_invitations`, `eagles_id_cards`, `announcements`, `attendance_events`, `attendance_records`, `contributions`, `expenses`, `constitution_sections`, `audit_logs`.
@@ -50,7 +50,7 @@
     - *Positive Test 1 (Baseline Pass):* Run preflight check on database created from Migrations 001–009. Expected: script runs cleanly with zero exceptions.
     - *Negative Test 1 (Type Mismatch Abort):* Alter `audit_logs.actor_type` to `varchar(20)`. Expected: raises fatal exception `PREFLIGHT VALIDATION FAILED: Missing baseline objects: Column: public.audit_logs.actor_type (varchar(50))`.
     - *Negative Test 2 (Non-Unique Email Index Abort):* Recreate `idx_members_email_lower` without `UNIQUE` keyword (`indisunique = false`). Expected: raises fatal exception `PREFLIGHT VALIDATION FAILED: Index: public.members.idx_members_email_lower (UNIQUE on LOWER(email))`.
-    - *Negative Test 3 (Wrong RAG Index Column Abort):* Recreate `idx_sections_embedding` indexing a text column instead of `embedding`. Expected: raises fatal exception `PREFLIGHT VALIDATION FAILED: Index: public.constitution_sections.idx_sections_embedding (HNSW on embedding with vector_cosine_ops)`.
+    - *Negative Test 3 (Wrong RAG Index Column Abort):* Recreate `idx_constitution_embedding_hnsw` indexing a text column instead of `embedding`. Expected: raises fatal exception `PREFLIGHT VALIDATION FAILED: Index: public.constitution_sections.idx_constitution_embedding_hnsw (HNSW on embedding with vector_cosine_ops)`.
     - *Negative Test 4 (Disabled RLS Abort):* Disable RLS on any public table. Expected: raises fatal exception `RLS disabled on table: public.[table_name]`.
 *   **Execution Status:** Script DDL verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR SCHEMA RELEASE GATE)**.
 
@@ -98,12 +98,14 @@
 *   **Source Location:** Section 7.2 of `implementation_plan.md` and `scripts/restore_database.sh`
 *   **Corrected Documentation & Control:**
     - **Fail-Fast Shell Handling:** Enforces `set -euo pipefail` at script start.
-    - **Independent Production Endpoint Verification:**
+    - **Primary Authoritative Target-Project Identity Verification:**
       - Requires non-empty `PROD_DB_HOST` and `TARGET_PROJECT_ID`.
-      - Rejects if `TARGET_PROJECT_ID == PROD_PROJECT_ID`.
+      - Authoritatively rejects if `TARGET_PROJECT_ID == PROD_PROJECT_ID`.
       - Enforces strict whitelist: `TARGET_ENV` must explicitly equal `staging` or `development`.
       - Compares `TARGET_DB_HOST` directly against `PROD_DB_HOST`.
-    - **Fail-Closed DNS Set Comparison:**
+      - Requires valid credentials for the authoritative target environment before connecting.
+    - **Secondary Defense-in-Depth (Fail-Closed DNS Set Comparison):**
+      - Documented that IP overlap is only a secondary signal (multi-tenant cloud ingress or proxy pools may share IPs; conversely aliases may route to prod). Authoritative target-project/endpoint identity verification above is the primary prerequisite before connecting.
       - Resolves complete normalized IPv4 and IPv6 address sets for both `TARGET_HOST` and `PROD_DB_HOST` (`sort -u`).
       - Fails closed immediately if either host resolution fails or returns an empty address set.
       - Uses `comm -12` to detect any overlapping IP address between target and production sets; aborts immediately with fatal error if any address is shared.

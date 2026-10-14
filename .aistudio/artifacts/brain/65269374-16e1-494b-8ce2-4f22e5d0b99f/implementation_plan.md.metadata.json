@@ -1,6 +1,6 @@
 {
-  "summary": "AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan, Revision 3.8 (Production Architecture & Testable Baseline Specification). Fully resolves all remaining blockers: aligns preflight assertions with actual schema definitions (idx_members_email_lower on LOWER(email), uq_reference_payment on (payment_channel, reference_number), and idx_sections_embedding with HNSW cosine similarity), strengthens restore script with independent trusted production endpoint verification and canonical IP checks, expands post-restore assertions to verify referential integrity across all member references in expenses (recorded_by, approved_by, reversed_by) and active RLS across ALL public tables, and provides concrete test fixtures while keeping all runtime tests explicitly marked NOT EXECUTED.",
-  "updatedAt": "2026-10-13T21:07:00.000000000Z",
+  "summary": "AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan, Revision 3.10 (HNSW Index Alignment & Authoritative Restore Guard Specification). Fully reconciles preflight assertions with actual schema definitions (idx_members_email_lower on LOWER(email) with indisunique=true, uq_reference_payment on (payment_channel, reference_number), and idx_constitution_embedding_hnsw with HNSW vector_cosine_ops on public.constitution_sections.embedding), defines authoritative target-project identity verification with secondary DNS/IP overlap defense-in-depth in the restore runbook, and keeps all runtime tests and drills marked NOT EXECUTED.",
+  "updatedAt": "2026-10-13T21:30:00.000000000Z",
   "requestFeedback": true,
   "userFacing": true
 }

@@ -1,5 +1,5 @@
 # AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan
-**Document Version:** Revision 3.9 (Production Architecture & Testable Baseline Specification)  
+**Document Version:** Revision 3.10 (HNSW Index Alignment & Authoritative Restore Guard Specification)  
 **Status:** Completed Phase 00 Planning Specification (Awaiting Stakeholder Approval)  
 **Target Platform:** Android (React Native + Expo SDK 52+ + TypeScript)  
 **Backend:** Supabase (PostgreSQL 16, GoTrue Auth, Storage, Edge Functions, pgvector)  
@@ -1712,7 +1712,10 @@ USING (
     *   **Supabase Pro / Team Tier (with PITR Add-On):** Continuous physical Write-Ahead Log (WAL) archiving with a **7-day retention window**. RPO is $\le 1\,\text{minute}$. **Meets the $\le 1\,\text{hour}$ RPO requirement.**
     *   **Supabase Free / Dev Tier:** Provides only automated daily logical backups. RPO is $\le 24\,\text{hours}$. **Fails the $\le 1\,\text{hour}$ RPO requirement.**
 *   **Restoration Safety & Invariant Rules:**
-    1. **Fail-Closed Production Endpoint Isolation:** Rather than relying on substring matching or single-IP lookups that fail open, the script enforces multi-layer endpoint comparison against trusted environment configurations. It directly compares `TARGET_DB_HOST` against authoritative `PROD_DB_HOST`, enforces a strict environment whitelist (`TARGET_ENV` must explicitly be `staging` or `development`), and executes **fail-closed DNS resolution** comparing complete normalized address sets (`comm -12`). If either host cannot be resolved, or if any overlapping IP address is detected, the script terminates immediately with a fatal error.
+    1. **Authoritative Project Identity & Multi-Layer Endpoint Isolation:** Connecting to a target database requires authoritative target-project and endpoint identity verification before connecting:
+       - **Primary Authoritative Identity Verification:** The script asserts `TARGET_PROJECT_ID` is set and explicitly distinct from `PROD_PROJECT_ID`, verifies that `TARGET_ENV` is explicitly allowlisted (`staging` or `development`), and requires authoritative target project credentials. Connecting to production is strictly blocked.
+       - **Direct Hostname Comparison:** `TARGET_HOST` (or `TARGET_DB_HOST`) is directly compared against authoritative `PROD_DB_HOST`.
+       - **Secondary Defense-in-Depth (Fail-Closed DNS Resolution & Address-Set Comparison):** IP overlap analysis is a secondary defensive signal (since multi-tenant cloud proxies or shared ingress pools may share IP ranges, or DNS aliases may obscure routing). The script resolves complete normalized address sets for both endpoints (`comm -12`) and fails closed immediately if either resolution fails, returns empty sets, or reveals overlapping addresses. Authoritative project identity verification remains the primary prerequisite before initiating any connection.
     2. **Fail-Fast Shell Handling:** Bash script enforces `set -euo pipefail` to terminate immediately on command failure, uninitialized variables, or pipeline errors.
     3. **Atomic Single-Transaction Safety:** Restore executes via `psql --single-transaction -v ON_ERROR_STOP=1`. If any error or constraint violation occurs during execution, PostgreSQL rolls back all changes atomically.
     4. **Topological Order:** Data is inserted in strict topological dependency order (`members` -> `invitations`/`eagles_id_cards` -> `attendance_events` -> `attendance_records` -> `contributions` -> `expenses` -> `announcements` -> `audit_logs`). No unsafe session replication or trigger-disabling hacks are permitted.
@@ -1739,20 +1742,20 @@ if [ -z "${PROD_DB_HOST:-}" ]; then
     exit 1
 fi
 
-# Hard block 1: Reject identical project IDs
+# Primary Gate 1: Authoritative target-project identity check (reject identical project IDs)
 if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ]; then
     echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Aborted." >&2
     exit 1
 fi
 
-# Hard block 2: Strict environment target whitelist (must explicitly be staging or development)
+# Primary Gate 2: Strict environment target whitelist (must explicitly be staging or development)
 TARGET_ENV="${TARGET_ENV:-staging}"
 if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
     echo "FATAL: TARGET_ENV must be 'staging' or 'development' (received '$TARGET_ENV'). Production restores are blocked." >&2
     exit 1
 fi
 
-# Hard block 3: Independent endpoint verification against trusted production endpoint
+# Primary Gate 3: Direct authoritative endpoint verification against trusted production endpoint
 TARGET_HOST="${TARGET_DB_HOST:-db.${TARGET_PROJECT_ID}.supabase.co}"
 
 if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
@@ -1760,8 +1763,9 @@ if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
     exit 1
 fi
 
-# Hard block 4: Fail-closed complete address set verification (detects CNAME/proxy/IP aliases)
-# Resolve all IPv4 and IPv6 addresses for both endpoints, sort, and normalize
+# Secondary Defense-in-Depth: Fail-closed complete address set verification (detects CNAME/proxy/IP aliases)
+# Note: IP overlap is a secondary signal (multi-tenant edge proxies may share IPs, or aliases may route to prod).
+# Authoritative project identity and direct host comparison above remain the primary gate before connecting.
 TARGET_IPS=$( (getent ahosts "$TARGET_HOST" 2>/dev/null || getent hosts "$TARGET_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
 PROD_IPS=$( (getent ahosts "$PROD_DB_HOST" 2>/dev/null || getent hosts "$PROD_DB_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
 
@@ -1781,7 +1785,7 @@ OVERLAPPING_IPS=$(comm -12 <(echo "$TARGET_IPS") <(echo "$PROD_IPS"))
 if [ -n "$OVERLAPPING_IPS" ]; then
     echo "FATAL: Endpoint alias detected! TARGET_HOST ('$TARGET_HOST') shares resolved IP address(es) with PROD_DB_HOST ('$PROD_DB_HOST'):" >&2
     echo "$OVERLAPPING_IPS" >&2
-    echo "Restore aborted by endpoint isolation policy." >&2
+    echo "Restore aborted by secondary endpoint isolation policy." >&2
     exit 1
 fi
 
@@ -2106,17 +2110,17 @@ BEGIN
         v_missing_items := array_append(v_missing_items, 'Constraint: public.contributions.uq_reference_payment (UNIQUE on payment_channel, reference_number)');
     END IF;
 
-    -- Check 6c: HNSW Cosine Similarity Index on public.constitution_sections (asserts HNSW method, embedding column, and cosine ops)
+    -- Check 6c: HNSW Cosine Similarity Index on public.constitution_sections (asserts table, index name, HNSW access method, and embedding with vector_cosine_ops)
     IF NOT EXISTS (
         SELECT 1 
         FROM pg_indexes
         WHERE schemaname = 'public' 
           AND tablename = 'constitution_sections' 
-          AND indexname = 'idx_sections_embedding'
+          AND indexname = 'idx_constitution_embedding_hnsw'
           AND indexdef ILIKE '%hnsw%'
           AND indexdef ILIKE '%(embedding%vector_cosine_ops)%'
     ) THEN
-        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_sections_embedding (HNSW on embedding with vector_cosine_ops)');
+        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_constitution_embedding_hnsw (HNSW on embedding with vector_cosine_ops)');
     END IF;
 
     -- 7. Check Active Row Level Security on ALL 10 Public Tables
@@ -2148,8 +2152,9 @@ END $$;
 | **P0-03** | Member identity protection | Trigger blocking self-service edits to names, `auth_user_id`, chapter, role, status | `002_members_and_directory.sql` | **Pos:** Member updates own nickname and avatar.<br>**Neg:** Member updates legal name, `auth_user_id`, or `club_chapter`; verify SQL exception. | Privilege Gate | **NOT EXECUTED** *(Scheduled for Privilege Gate)* |
 | **P1-01** | Audit privacy & actor attribution | Strict per-table allowlist with zero fallback leakage; trusted server actor attribution; regression fix on `expenses.new_data.category` | `008_audit_logs_and_triggers.sql` | **Pos 1:** Member mutation records allowlisted attributes only.<br>**Pos 2 (Regression Test):** Insert expense record (`category = 'venue_rental'`); verify audit log `new_data->>'category' = 'venue_rental'` is captured correctly and non-null.<br>**Neg:** Check audit log on ID cards (paths absent); check invitations (`token_hash` absent); check unallowlisted column exclusion. | Audit Gate | **NOT EXECUTED** *(Scheduled for Audit Gate)* |
 | **P1-02** | Attendance verification integrity | Server-controlled trigger binds `verified_by := v_caller.member_id` | `005_announcements_and_attendance.sql` | **Pos:** Officer marks attendance; verified_by set to Officer ID.<br>**Neg:** Officer passes third-party UUID as verified_by; verify server overrides with caller ID. | Attendance Gate | **NOT EXECUTED** *(Scheduled for Attendance Gate)* |
-| **P1-03** | Validated backup/restore runbook & automated assertions | Multi-layer production guard (direct endpoint match, fail-closed DNS resolution comparing complete normalized IP sets via `comm -12`, environment whitelist), fail-fast `set -euo pipefail`, single transaction, topological FK order, exhaustive automated PL/pgSQL invariant assertions covering all member references and all public tables | Section 7.2 of plan | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity across all member references (recorded, approved, reversed, verified, closed), financial invariants, and RLS on all public tables.<br>**Neg 1:** Pass production host, or host where complete normalized IP set shares addresses with production; verify script halts immediately before connection.<br>**Neg 2:** Either DNS resolution fails or returns empty address set; verify script fails closed immediately.<br>**Neg 3:** Pass disallowed environment (`TARGET_ENV=production`); verify script halts immediately.<br>**Neg 4:** Pass corrupted archive; verify clean atomic rollback.<br>**Neg 5:** Backup contains orphan approved_by or reversed_by; verify post-restore assertion aborts and fails pipeline. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
-| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (10), columns/types (`audit_logs.actor_type varchar(50)`), triggers (6), security functions (3), index uniqueness (`idx_members_email_lower` `indisunique = true` on `LOWER(email)`), constraint uniqueness (`uq_reference_payment`), HNSW embedding index (`idx_sections_embedding` on `embedding` with `vector_cosine_ops`), and active RLS on all 10 tables | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline, asserting column types, index uniqueness, and indexed expressions.<br>**Neg 1:** Drop table, column, trigger, or index/constraint; verify script raises fatal validation exception.<br>**Neg 2:** Recreate email index without uniqueness or without `LOWER(email)`; verify script raises fatal validation exception.<br>**Neg 3:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
+| **P1-03** | Validated backup/restore runbook & automated assertions | Multi-layer target guard: primary authoritative target-project identity verification (`TARGET_PROJECT_ID` distinct from production, `TARGET_ENV` staging/development whitelist, direct `TARGET_HOST` vs `PROD_DB_HOST` comparison) and secondary defense-in-depth fail-closed DNS resolution comparing complete normalized IP sets via `comm -12`; fail-fast `set -euo pipefail`; single transaction; topological FK order; exhaustive automated PL/pgSQL invariant assertions covering all member references and all public tables | Section 7.2 of plan | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity across all member references (recorded, approved, reversed, verified, closed), financial invariants, and RLS on all public tables.<br>**Neg 1:** Pass production host, or host where complete normalized IP set shares addresses with production; verify script halts immediately before connection.<br>**Neg 2:** Either DNS resolution fails or returns empty address set; verify script fails closed immediately.<br>**Neg 3:** Pass disallowed environment (`TARGET_ENV=production`); verify script halts immediately.<br>**Neg 4:** Pass corrupted archive; verify clean atomic rollback.<br>**Neg 5:** Backup contains orphan approved_by or reversed_by; verify post-restore assertion aborts and fails pipeline. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
+| **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (10), columns/types (`audit_logs.actor_type varchar(50)`), triggers (6), security functions (3), index uniqueness (`idx_members_email_lower` `indisunique = true` on `LOWER(email)`), constraint uniqueness (`uq_reference_payment`), HNSW embedding index (`idx_constitution_embedding_hnsw` on `embedding` with `vector_cosine_ops`), and active RLS on all 10 tables | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline, asserting column types, index uniqueness, and indexed expressions.<br>**Neg 1:** Drop table, column, trigger, or index/constraint; verify script raises fatal validation exception.<br>**Neg 2:** Recreate email index without uniqueness or without `LOWER(email)`; verify script raises fatal validation exception.<br>**Neg 3:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
+| **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate | **NOT EXECUTED** *(Scheduled for RAG Gate)* |
 | **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate | **NOT EXECUTED** *(Scheduled for RAG Gate)* |
 
 ---

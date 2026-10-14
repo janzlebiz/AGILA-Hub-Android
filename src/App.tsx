@@ -43,7 +43,7 @@ export default function App() {
 
   const tabs: TabItem[] = [
     { id: 'overview', label: 'Executive Overview', icon: Layers },
-    { id: 'remediations', label: 'Remediations (3.9)', icon: Shield },
+    { id: 'remediations', label: 'Remediations (3.10)', icon: Shield },
     { id: 'matrix', label: 'Verification Matrix', icon: FileCheck },
     { id: 'migrations', label: 'SQL Migrations (001-009)', icon: Database },
     { id: 'preflight', label: 'Preflight Script', icon: Terminal },
@@ -70,8 +70,8 @@ export default function App() {
       title: 'Type-Aligned & Uniqueness-Verified Preflight Assertions',
       category: 'Database Integrity',
       location: 'scripts/preflight_schema_check.sql & Section 8.1',
-      problem: 'Previous preflight script checked audit_logs.actor_type as text (mismatching VARCHAR(50)), and checked index names without verifying index uniqueness (indisunique) on idx_members_email_lower or column embedding on idx_sections_embedding.',
-      solution: 'Aligned actor_type check to character varying(50). Added indisunique = true validation to idx_members_email_lower and uq_reference_payment. Verified idx_sections_embedding indexes embedding with vector_cosine_ops and HNSW.',
+      problem: 'Previous preflight script checked audit_logs.actor_type as text (mismatching VARCHAR(50)), and checked index names without verifying index uniqueness (indisunique) on idx_members_email_lower or column embedding on idx_constitution_embedding_hnsw.',
+      solution: 'Aligned actor_type check to character varying(50). Added indisunique = true validation to idx_members_email_lower and uq_reference_payment. Verified idx_constitution_embedding_hnsw indexes embedding with vector_cosine_ops and HNSW on public.constitution_sections.',
       status: 'VERIFIED BY SPEC & DDL',
       tests: [
         { type: 'Positive', name: 'Baseline Schema Pass', desc: 'Preflight script executes cleanly against complete schema baseline, verifying all 10 tables, 3 extensions, columns, triggers, functions, indexes, and active RLS.' },
@@ -107,11 +107,11 @@ export default function App() {
     },
     {
       id: 'REM-05',
-      title: 'Restore Safety: Fail-Closed DNS Resolution & Exhaustive Invariants',
+      title: 'Restore Safety: Authoritative Endpoint Identity & Fail-Closed Guards',
       category: 'Disaster Recovery',
       location: 'scripts/restore_database.sh & Section 7.2',
       problem: 'Previous restore script checked constructed substrings, failed open if DNS lookup returned empty, and checked only 4 tables for RLS.',
-      solution: 'Enforces set -euo pipefail, independent PROD_DB_HOST checks, fail-closed DNS set comparison via comm -12, atomic single-transaction restore, and exhaustive PL/pgSQL assertions across ALL member references and ALL public tables.',
+      solution: 'Enforces set -euo pipefail, primary authoritative target-project identity verification (TARGET_PROJECT_ID, TARGET_ENV, TARGET_DB_HOST vs PROD_DB_HOST), secondary defense-in-depth DNS set comparison via comm -12, atomic single-transaction restore, and exhaustive PL/pgSQL assertions across ALL member references and ALL public tables.',
       status: 'VERIFIED BY SPECIFICATION',
       tests: [
         { type: 'Positive', name: 'Valid Staging Execution', desc: 'Executes restore on verified backup targeting staging; automated PL/pgSQL assertions verify all foreign keys, financial invariants, and RLS.' },
@@ -124,13 +124,13 @@ export default function App() {
   const matrixItems = [
     { id: 'REV-01-A', requirement: 'Strict per-table audit allowlist & payload fix', target: 'Migration 008 (process_audit_log_capture)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Audit Gate', notes: 'expenses.new_data.category fixed to v_raw_new; zero fallback leakage' },
     { id: 'REV-01-B', requirement: 'Audit privacy & category regression tests', target: 'Audit Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Audit Gate', notes: 'Positive category regression test on insert and update specified' },
-    { id: 'REV-02-A', requirement: 'Schema-aligned preflight index & table assertions', target: 'scripts/preflight_schema_check.sql', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Validates idx_members_email_lower, uq_reference_payment, idx_sections_embedding, 10 tables, RLS' },
+    { id: 'REV-02-A', requirement: 'Schema-aligned preflight index & table assertions', target: 'scripts/preflight_schema_check.sql', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Validates idx_members_email_lower, uq_reference_payment, idx_constitution_embedding_hnsw, 10 tables, RLS' },
     { id: 'REV-02-B', requirement: 'Preflight schema validation tests', target: 'Schema Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Schema Gate', notes: 'Passing baseline and negative drop fixtures specified' },
     { id: 'REV-03-A', requirement: 'Expense approval & reversal attribution', target: 'Migration 006 (validate_expense_mutation)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'approved_by preserved; reversed_by/at tracked with mandatory reason' },
     { id: 'REV-03-B', requirement: 'Expense attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive approval/reversal and negative tampering tests specified' },
     { id: 'REV-04-A', requirement: 'Contribution verification attribution', target: 'Migration 006 (protect_payment_state_transitions)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'verified_by preserved; closed_by/at tracked with void reason' },
     { id: 'REV-04-B', requirement: 'Contribution attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive verification/voiding and negative spoofing tests specified' },
-    { id: 'REV-05-A', requirement: 'Independent endpoint isolation & exhaustive invariant checks', target: 'scripts/restore_database.sh & Section 7.2', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'PROD_DB_HOST verification, DNS/IP check, all-public-table RLS, expense approved/reversed checks' },
+    { id: 'REV-05-A', requirement: 'Authoritative endpoint isolation & exhaustive invariant checks', target: 'scripts/restore_database.sh & Section 7.2', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Primary target-project verification, secondary DNS/IP set check, all-public-table RLS, expense approved/reversed checks' },
     { id: 'REV-05-B', requirement: 'Live restore runbook execution & drill', target: 'Recovery Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Staging restore drill scheduled for Phase 07 on Supabase Pro' },
     { id: 'P0-03-A', requirement: 'Member identity protection trigger', target: 'Migration 002 (protect_member_sensitive_columns)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Privilege Gate', notes: 'Self-service restricted to nickname/avatar only' },
     { id: 'P1-02-A', requirement: 'Attendance verification attribution', target: 'Migration 005 (validate_attendance_record_mutation)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Attendance Gate', notes: 'Server forces verified_by := v_caller.member_id' },
@@ -144,7 +144,7 @@ export default function App() {
     { num: 4, name: '004_eagles_id_cards.sql', desc: 'Private ID card verification tracking and storage paths.' },
     { num: 5, name: '005_announcements_and_attendance.sql', desc: 'Broadcast announcements and attendance verification with server attribution.' },
     { num: 6, name: '006_financial_records.sql', desc: 'uq_reference_payment UNIQUE constraint, state machines, and preserved attribution.' },
-    { num: 7, name: '007_constitution_rag.sql', desc: 'pgvector chunk storage, HNSW index (idx_sections_embedding), and server 0.68 similarity floor.' },
+    { num: 7, name: '007_constitution_rag.sql', desc: 'pgvector chunk storage, HNSW index (idx_constitution_embedding_hnsw), and server 0.68 similarity floor.' },
     { num: 8, name: '008_audit_logs_and_triggers.sql', desc: 'Immutable audit ledger, strict allowlists, and expense new_data.category bug fix.' },
     { num: 9, name: '009_rls_and_storage_policies.sql', desc: 'Comprehensive fail-closed RLS policies across all tables and private storage buckets.' }
   ];
@@ -162,7 +162,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight text-white">AGILA Hub Android</span>
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Revision 3.9
+                  Revision 3.10
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Production Architecture & Testable Baseline Specification</p>
@@ -205,7 +205,7 @@ export default function App() {
 
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Reconciled: Preflight Indexes & Restore Endpoints
+            Reconciled: HNSW Index & Authoritative Restore Guard
           </div>
         </div>
 
@@ -216,13 +216,13 @@ export default function App() {
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 <div className="space-y-2 max-w-3xl">
                   <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-300 text-xs font-semibold border border-sky-500/20">
-                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.9 Production Specification
+                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.10 Production Specification
                   </div>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                     TFOE-PE Bantayog Elite Eagles Club Android Platform
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions, audit payload sources, and independent restore endpoint verification are completely reconciled.
+                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions for idx_constitution_embedding_hnsw, audit payload sources, and authoritative restore endpoint verification are completely reconciled.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[240px]">
@@ -242,18 +242,18 @@ export default function App() {
               </div>
             </div>
 
-            {/* 5 Pillars of Revision 3.9 */}
+            {/* 5 Pillars of Revision 3.10 */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Aligned Preflight Indexes</div>
+                <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Aligned HNSW & Email Indexes</div>
                 <p className="text-xs text-slate-300">
-                  Preflight script now checks <code className="text-sky-300">idx_members_email_lower</code> with <code className="text-emerald-300">indisunique = true</code> and <code className="text-sky-300">uq_reference_payment</code> on <code className="text-emerald-300">(payment_channel, reference_number)</code>.
+                  Preflight script validates <code className="text-sky-300">idx_constitution_embedding_hnsw</code> on <code className="text-emerald-300">constitution_sections.embedding</code> with HNSW and <code className="text-sky-300">idx_members_email_lower</code> with <code className="text-emerald-300">indisunique = true</code>.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
-                <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Independent Restore Isolation</div>
+                <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Authoritative Target Guard</div>
                 <p className="text-xs text-slate-300">
-                  Restoration checks <code className="text-emerald-300">TARGET_DB_HOST</code> directly against <code className="text-amber-300">PROD_DB_HOST</code>, verifies complete canonical DNS/IP sets with <code className="text-purple-300">comm -12</code>, and enforces strict environment whitelisting.
+                  Primary authoritative target-project identity check (<code className="text-emerald-300">TARGET_PROJECT_ID</code>, whitelist, <code className="text-amber-300">PROD_DB_HOST</code> comparison) with secondary <code className="text-purple-300">comm -12</code> IP overlap defense.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
@@ -275,7 +275,7 @@ export default function App() {
         {/* Tab 2: Remediations */}
         {activeTab === 'remediations' && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.9)</h2>
+            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.10)</h2>
             <div className="space-y-4">
               {remediations.map((rem) => (
                 <div key={rem.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
@@ -454,7 +454,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email_lower ON public.members (LOW
 CONSTRAINT uq_reference_payment UNIQUE (payment_channel, reference_number);`}
                       {selectedMigration === 7 && `-- Migration 007: Constitution RAG
 -- HNSW Cosine Similarity Index:
-CREATE INDEX IF NOT EXISTS idx_sections_embedding ON public.constitution_sections USING hnsw (embedding vector_cosine_ops);`}
+CREATE INDEX IF NOT EXISTS idx_constitution_embedding_hnsw ON public.constitution_sections USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);`}
                       {selectedMigration === 8 && `-- Migration 008: Audit Logs & Triggers
 -- Preserves category mapping correctly:
 v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'category', v_raw_new->'category', ...);`}
@@ -473,7 +473,7 @@ v_safe_new := jsonb_build_object('id', v_raw_new->'id', 'category', v_raw_new->'
             <div>
               <h2 className="text-xl font-bold text-white">Machine-Verifiable Preflight Script (`scripts/preflight_schema_check.sql`)</h2>
               <p className="text-xs text-slate-400">
-                Validates <code className="text-sky-300">idx_members_email_lower</code>, <code className="text-emerald-300">uq_reference_payment</code>, <code className="text-amber-300">idx_sections_embedding</code>, all 10 tables, triggers, and active RLS.
+                Validates <code className="text-sky-300">idx_members_email_lower</code>, <code className="text-emerald-300">uq_reference_payment</code>, <code className="text-amber-300">idx_constitution_embedding_hnsw</code>, all 10 tables, triggers, and active RLS.
               </p>
             </div>
 
@@ -556,15 +556,16 @@ BEGIN
         v_missing_items := array_append(v_missing_items, 'Constraint: public.contributions.uq_reference_payment UNIQUE (payment_channel, reference_number)');
     END IF;
 
-    -- Check 6c: HNSW Cosine Index on public.constitution_sections
+    -- Check 6c: HNSW Cosine Index on public.constitution_sections (idx_constitution_embedding_hnsw)
     IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
         WHERE schemaname = 'public' 
           AND tablename = 'constitution_sections' 
-          AND indexname = 'idx_sections_embedding'
-          AND indexdef ILIKE '%hnsw%vector_cosine_ops%'
+          AND indexname = 'idx_constitution_embedding_hnsw'
+          AND indexdef ILIKE '%hnsw%'
+          AND indexdef ILIKE '%(embedding%vector_cosine_ops)%'
     ) THEN
-        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_sections_embedding (HNSW)');
+        v_missing_items := array_append(v_missing_items, 'Index: public.constitution_sections.idx_constitution_embedding_hnsw (HNSW on embedding with vector_cosine_ops)');
     END IF;
 
     -- 7. Check Active Row Level Security on ALL 10 Public Tables
@@ -615,31 +616,38 @@ if [ -z "\${PROD_DB_HOST:-}" ]; then
     exit 1
 fi
 
-# Guard 1: Direct ID check
+# Primary Gate 1: Authoritative target-project identity check
 if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ]; then
     echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Aborted." >&2
     exit 1
 fi
 
-# Guard 2: Whitelist
+# Primary Gate 2: Strict environment target whitelist
 TARGET_ENV="\${TARGET_ENV:-staging}"
 if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
     echo "FATAL: TARGET_ENV must be 'staging' or 'development' (received '$TARGET_ENV')." >&2
     exit 1
 fi
 
-# Guard 3: Direct Endpoint Match
+# Primary Gate 3: Direct authoritative endpoint verification
 TARGET_HOST="\${TARGET_DB_HOST:-db.\${TARGET_PROJECT_ID}.supabase.co}"
 if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
     echo "FATAL: TARGET_HOST ('$TARGET_HOST') matches trusted production endpoint ('$PROD_DB_HOST'). Aborted." >&2
     exit 1
 fi
 
-# Guard 4: Canonical DNS / IP Match
-TARGET_IP=$(getent hosts "$TARGET_HOST" 2>/dev/null | awk '{print $1}' || true)
-PROD_IP=$(getent hosts "$PROD_DB_HOST" 2>/dev/null | awk '{print $1}' || true)
-if [ -n "$TARGET_IP" ] && [ -n "$PROD_IP" ] && [ "$TARGET_IP" = "$PROD_IP" ]; then
-    echo "FATAL: TARGET_HOST ($TARGET_HOST -> $TARGET_IP) resolves to same IP as PROD_DB_HOST ($PROD_DB_HOST -> $PROD_IP). Aborted." >&2
+# Secondary Defense-in-Depth: Fail-closed complete address set verification (comm -12)
+# Note: IP overlap is a secondary signal; authoritative project identity above is the primary prerequisite.
+TARGET_IPS=$( (getent ahosts "$TARGET_HOST" 2>/dev/null || getent hosts "$TARGET_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
+PROD_IPS=$( (getent ahosts "$PROD_DB_HOST" 2>/dev/null || getent hosts "$PROD_DB_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
+if [ -z "$TARGET_IPS" ] || [ -z "$PROD_IPS" ]; then
+    echo "FATAL: DNS resolution failed or returned empty address set. Fail-closed abort." >&2
+    exit 1
+fi
+
+OVERLAPPING_IPS=$(comm -12 <(echo "$TARGET_IPS") <(echo "$PROD_IPS"))
+if [ -n "$OVERLAPPING_IPS" ]; then
+    echo "FATAL: Endpoint alias detected! TARGET_HOST shares resolved IP address(es) with PROD_DB_HOST." >&2
     exit 1
 fi
 
@@ -747,7 +755,7 @@ EOF`}
 
       {/* Footer */}
       <footer className="border-t border-slate-800 bg-slate-950 py-4 px-4 text-center text-xs text-slate-500">
-        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.9 Baseline
+        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.10 Baseline
       </footer>
     </div>
   );
