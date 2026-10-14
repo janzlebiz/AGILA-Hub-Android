@@ -1,5 +1,5 @@
 # AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan
-**Document Version:** Revision 3.10 (HNSW Index Alignment & Authoritative Restore Guard Specification)  
+**Document Version:** Revision 3.11 (Explicit TARGET_ENV & Authoritative Target Identity Mapping)  
 **Status:** Completed Phase 00 Planning Specification (Awaiting Stakeholder Approval)  
 **Target Platform:** Android (React Native + Expo SDK 52+ + TypeScript)  
 **Backend:** Supabase (PostgreSQL 16, GoTrue Auth, Storage, Edge Functions, pgvector)  
@@ -1713,8 +1713,9 @@ USING (
     *   **Supabase Free / Dev Tier:** Provides only automated daily logical backups. RPO is $\le 24\,\text{hours}$. **Fails the $\le 1\,\text{hour}$ RPO requirement.**
 *   **Restoration Safety & Invariant Rules:**
     1. **Authoritative Project Identity & Multi-Layer Endpoint Isolation:** Connecting to a target database requires authoritative target-project and endpoint identity verification before connecting:
-       - **Primary Authoritative Identity Verification:** The script asserts `TARGET_PROJECT_ID` is set and explicitly distinct from `PROD_PROJECT_ID`, verifies that `TARGET_ENV` is explicitly allowlisted (`staging` or `development`), and requires authoritative target project credentials. Connecting to production is strictly blocked.
-       - **Direct Hostname Comparison:** `TARGET_HOST` (or `TARGET_DB_HOST`) is directly compared against authoritative `PROD_DB_HOST`.
+       - **Mandatory Explicit Target Environment (`TARGET_ENV`):** `TARGET_ENV` must be explicitly declared and set to either `staging` or `development`. No implicit defaults are allowed; if unset or empty, the script aborts immediately with exit code 1. Production restores are unconditionally blocked.
+       - **Authoritative Target Identity & Project-to-Endpoint Mapping:** The script asserts `TARGET_PROJECT_ID` and `PROD_PROJECT_ID` are set, non-empty, and distinct (`TARGET_PROJECT_ID != PROD_PROJECT_ID`). It authoritatively validates that `TARGET_DB_HOST` matches the trusted project-to-endpoint naming convention (`EXPECTED_TARGET_HOST="db.${TARGET_PROJECT_ID}.supabase.co"`). Any mismatch between declared project ID and target hostname halts execution prior to connecting.
+       - **Direct Hostname Comparison:** `TARGET_HOST` is directly compared against authoritative `PROD_DB_HOST` (`TARGET_HOST != PROD_DB_HOST`).
        - **Secondary Defense-in-Depth (Fail-Closed DNS Resolution & Address-Set Comparison):** IP overlap analysis is a secondary defensive signal (since multi-tenant cloud proxies or shared ingress pools may share IP ranges, or DNS aliases may obscure routing). The script resolves complete normalized address sets for both endpoints (`comm -12`) and fails closed immediately if either resolution fails, returns empty sets, or reveals overlapping addresses. Authoritative project identity verification remains the primary prerequisite before initiating any connection.
     2. **Fail-Fast Shell Handling:** Bash script enforces `set -euo pipefail` to terminate immediately on command failure, uninitialized variables, or pipeline errors.
     3. **Atomic Single-Transaction Safety:** Restore executes via `psql --single-transaction -v ON_ERROR_STOP=1`. If any error or constraint violation occurs during execution, PostgreSQL rolls back all changes atomically.
@@ -1724,40 +1725,53 @@ USING (
 ```bash
 #!/usr/bin/env bash
 # AGILA Hub — Transaction-Safe Restore Runbook (Staging / Recovery Testing Only)
+# Revision 3.11: Enforces explicit TARGET_ENV and authoritative target-project identity mapping
 set -euo pipefail
 
-# 1. Enforce Fail-Fast Guard & Target Environment Policy
+# 1. Enforce Mandatory TARGET_ENV (No implicit default allowed)
+if [ -z "${TARGET_ENV:-}" ]; then
+    echo "FATAL: TARGET_ENV is unset or empty. Explicit environment ('staging' or 'development') is required. Aborted." >&2
+    exit 1
+fi
+
+if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
+    echo "FATAL: TARGET_ENV must be explicitly 'staging' or 'development' (received '$TARGET_ENV'). Production restores are blocked." >&2
+    exit 1
+fi
+
+# 2. Enforce Mandatory Project IDs & Authoritative Production Endpoint
 if [ -z "${TARGET_PROJECT_ID:-}" ]; then
-    echo "FATAL: TARGET_PROJECT_ID is unset. Aborted." >&2
+    echo "FATAL: TARGET_PROJECT_ID is unset or empty. Aborted." >&2
     exit 1
 fi
 
 if [ -z "${PROD_PROJECT_ID:-}" ]; then
-    echo "FATAL: PROD_PROJECT_ID is unset. Cannot verify production isolation guard." >&2
+    echo "FATAL: PROD_PROJECT_ID is unset or empty. Cannot verify production isolation guard." >&2
     exit 1
 fi
 
 if [ -z "${PROD_DB_HOST:-}" ]; then
-    echo "FATAL: PROD_DB_HOST is unset. Authoritative production endpoint required for isolation verification." >&2
+    echo "FATAL: PROD_DB_HOST is unset or empty. Authoritative production endpoint required for isolation verification." >&2
     exit 1
 fi
 
 # Primary Gate 1: Authoritative target-project identity check (reject identical project IDs)
 if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ]; then
-    echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Aborted." >&2
+    echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Production restores are strictly forbidden. Aborted." >&2
     exit 1
 fi
 
-# Primary Gate 2: Strict environment target whitelist (must explicitly be staging or development)
-TARGET_ENV="${TARGET_ENV:-staging}"
-if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
-    echo "FATAL: TARGET_ENV must be 'staging' or 'development' (received '$TARGET_ENV'). Production restores are blocked." >&2
+# Primary Gate 2: Authoritative Project-to-Endpoint Mapping Verification
+# TARGET_DB_HOST must authoritatively belong to the declared TARGET_PROJECT_ID
+EXPECTED_TARGET_HOST="db.${TARGET_PROJECT_ID}.supabase.co"
+TARGET_HOST="${TARGET_DB_HOST:-$EXPECTED_TARGET_HOST}"
+
+if [ "$TARGET_HOST" != "$EXPECTED_TARGET_HOST" ]; then
+    echo "FATAL: Authoritative target identity verification failed! TARGET_DB_HOST ('$TARGET_HOST') does not match authoritative endpoint for TARGET_PROJECT_ID ('$TARGET_PROJECT_ID') [Expected: '$EXPECTED_TARGET_HOST']. Aborted." >&2
     exit 1
 fi
 
-# Primary Gate 3: Direct authoritative endpoint verification against trusted production endpoint
-TARGET_HOST="${TARGET_DB_HOST:-db.${TARGET_PROJECT_ID}.supabase.co}"
-
+# Primary Gate 3: Direct authoritative endpoint comparison against production endpoint
 if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
     echo "FATAL: TARGET_HOST ('$TARGET_HOST') matches trusted production endpoint ('$PROD_DB_HOST'). Aborted." >&2
     exit 1
@@ -1765,7 +1779,7 @@ fi
 
 # Secondary Defense-in-Depth: Fail-closed complete address set verification (detects CNAME/proxy/IP aliases)
 # Note: IP overlap is a secondary signal (multi-tenant edge proxies may share IPs, or aliases may route to prod).
-# Authoritative project identity and direct host comparison above remain the primary gate before connecting.
+# Authoritative project identity, environment check, and project-to-endpoint mapping above remain the primary gate before connecting.
 TARGET_IPS=$( (getent ahosts "$TARGET_HOST" 2>/dev/null || getent hosts "$TARGET_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
 PROD_IPS=$( (getent ahosts "$PROD_DB_HOST" 2>/dev/null || getent hosts "$PROD_DB_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | grep -v '^$' )
 
@@ -1789,7 +1803,7 @@ if [ -n "$OVERLAPPING_IPS" ]; then
     exit 1
 fi
 
-# 2. Validate Explicit Single Backup File & Checksum
+# 3. Validate Explicit Single Backup File & Checksum
 BACKUP_FILE="${1:-./backups/backup_staging_test.sql}"
 if [ ! -s "$BACKUP_FILE" ]; then
     echo "FATAL: Backup file '$BACKUP_FILE' does not exist or is empty." >&2
@@ -1956,12 +1970,16 @@ echo "Restore and post-restore integrity assertions completed successfully."
 ```
 
 *   **Restore Script Test Fixtures (Specification & Fixture Coverage):**
-    *   **Positive Fixture 1 (Valid Staging Execution):** Script executes with `TARGET_ENV=staging`, `TARGET_DB_HOST=db.staging-ref.supabase.co`, `PROD_DB_HOST=db.prod-ref.supabase.co`. Expected: all endpoint guards pass, restore executes within single transaction, and post-restore PL/pgSQL assertion executes cleanly with notice.
-    *   **Negative Fixture 1 (Direct Endpoint Match):** Script executes with `TARGET_DB_HOST=db.prod-ref.supabase.co` matching `PROD_DB_HOST`. Expected: terminates immediately before connection with `FATAL: TARGET_HOST matches trusted production endpoint`.
-    *   **Negative Fixture 2 (DNS Resolution Match):** Script executes where `TARGET_DB_HOST` and `PROD_DB_HOST` resolve to identical IP address. Expected: terminates immediately before connection with `FATAL: TARGET_HOST resolves to same IP as PROD_DB_HOST`.
-    *   **Negative Fixture 3 (Disallowed Environment):** Script executes with `TARGET_ENV=production`. Expected: terminates immediately with `FATAL: TARGET_ENV must be 'staging' or 'development'`.
-    *   **Negative Fixture 4 (Orphan approved_by / reversed_by FK):** Database backup contains an expense row with `approved_by` or `reversed_by` referencing non-existent member. Expected: post-restore assertion raises `POST-RESTORE INTEGRITY FAILURE: Found orphan approved_by` and fails script with non-zero exit code.
-    *   **Negative Fixture 5 (Disabled Public Table RLS):** Database target has `rowsecurity = FALSE` on any public table (e.g. `eagles_id_cards`). Expected: post-restore assertion raises `POST-RESTORE INTEGRITY FAILURE: Found public tables with disabled RLS` and fails script with non-zero exit code.
+    *   **Positive Fixture 1 (Valid Staging Execution):** Script executes with `TARGET_ENV=staging`, `TARGET_PROJECT_ID=agila-hub-staging`, `TARGET_DB_HOST=db.agila-hub-staging.supabase.co`, `PROD_PROJECT_ID=agila-hub-prod`, `PROD_DB_HOST=db.agila-hub-prod.supabase.co`. Expected: all endpoint and identity guards pass, restore executes within single transaction, and post-restore PL/pgSQL assertion executes cleanly with notice.
+    *   **Negative Fixture 1 (Missing TARGET_ENV):** Script executes with `TARGET_ENV` unset or empty. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_ENV is unset or empty. Explicit environment ('staging' or 'development') is required. Aborted.`
+    *   **Negative Fixture 2 (Disallowed Environment):** Script executes with `TARGET_ENV=production`. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_ENV must be explicitly 'staging' or 'development' (received 'production'). Production restores are blocked.`
+    *   **Negative Fixture 3 (Hostname / Project-ID Mismatch):** Script executes with `TARGET_PROJECT_ID=agila-hub-staging` and mismatched `TARGET_DB_HOST=db.agila-hub-prod.supabase.co` (or any endpoint not matching authoritative project mapping `db.${TARGET_PROJECT_ID}.supabase.co`). Expected: terminates immediately before connection with exit code 1 and error `FATAL: Authoritative target identity verification failed! TARGET_DB_HOST ... does not match authoritative endpoint for TARGET_PROJECT_ID ...`.
+    *   **Negative Fixture 4 (Target Project Matches Prod Project):** Script executes with `TARGET_PROJECT_ID=agila-hub-prod` and `PROD_PROJECT_ID=agila-hub-prod`. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('agila-hub-prod'). Production restores are strictly forbidden. Aborted.`
+    *   **Negative Fixture 5 (Direct Endpoint Match):** Script executes with `TARGET_DB_HOST=db.prod-ref.supabase.co` matching `PROD_DB_HOST`. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_HOST matches trusted production endpoint`.
+    *   **Negative Fixture 6 (Fail-Closed DNS Resolution Failure):** Script executes where `TARGET_DB_HOST` or `PROD_DB_HOST` cannot be resolved to non-empty address set. Expected: terminates immediately before connection with exit code 1 and error `FATAL: DNS resolution failed or returned empty address set`.
+    *   **Negative Fixture 7 (IP Address Set Overlap):** Script executes where `TARGET_DB_HOST` and `PROD_DB_HOST` resolve to overlapping IP address set. Expected: terminates immediately before connection with exit code 1 and error `FATAL: Endpoint alias detected! TARGET_HOST shares resolved IP address(es) with PROD_DB_HOST`.
+    *   **Negative Fixture 8 (Orphan approved_by / reversed_by FK):** Database backup contains an expense row with `approved_by` or `reversed_by` referencing non-existent member. Expected: post-restore assertion raises `POST-RESTORE INTEGRITY FAILURE: Found orphan approved_by` and fails script with non-zero exit code.
+    *   **Negative Fixture 9 (Disabled Public Table RLS):** Database target has `rowsecurity = FALSE` on any public table (e.g. `eagles_id_cards`). Expected: post-restore assertion raises `POST-RESTORE INTEGRITY FAILURE: Found public tables with disabled RLS` and fails script with non-zero exit code.
     *   *Real Restore Drill Execution Status:* **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE IN PHASE 07)**.
 
 
@@ -2152,9 +2170,8 @@ END $$;
 | **P0-03** | Member identity protection | Trigger blocking self-service edits to names, `auth_user_id`, chapter, role, status | `002_members_and_directory.sql` | **Pos:** Member updates own nickname and avatar.<br>**Neg:** Member updates legal name, `auth_user_id`, or `club_chapter`; verify SQL exception. | Privilege Gate | **NOT EXECUTED** *(Scheduled for Privilege Gate)* |
 | **P1-01** | Audit privacy & actor attribution | Strict per-table allowlist with zero fallback leakage; trusted server actor attribution; regression fix on `expenses.new_data.category` | `008_audit_logs_and_triggers.sql` | **Pos 1:** Member mutation records allowlisted attributes only.<br>**Pos 2 (Regression Test):** Insert expense record (`category = 'venue_rental'`); verify audit log `new_data->>'category' = 'venue_rental'` is captured correctly and non-null.<br>**Neg:** Check audit log on ID cards (paths absent); check invitations (`token_hash` absent); check unallowlisted column exclusion. | Audit Gate | **NOT EXECUTED** *(Scheduled for Audit Gate)* |
 | **P1-02** | Attendance verification integrity | Server-controlled trigger binds `verified_by := v_caller.member_id` | `005_announcements_and_attendance.sql` | **Pos:** Officer marks attendance; verified_by set to Officer ID.<br>**Neg:** Officer passes third-party UUID as verified_by; verify server overrides with caller ID. | Attendance Gate | **NOT EXECUTED** *(Scheduled for Attendance Gate)* |
-| **P1-03** | Validated backup/restore runbook & automated assertions | Multi-layer target guard: primary authoritative target-project identity verification (`TARGET_PROJECT_ID` distinct from production, `TARGET_ENV` staging/development whitelist, direct `TARGET_HOST` vs `PROD_DB_HOST` comparison) and secondary defense-in-depth fail-closed DNS resolution comparing complete normalized IP sets via `comm -12`; fail-fast `set -euo pipefail`; single transaction; topological FK order; exhaustive automated PL/pgSQL invariant assertions covering all member references and all public tables | Section 7.2 of plan | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity across all member references (recorded, approved, reversed, verified, closed), financial invariants, and RLS on all public tables.<br>**Neg 1:** Pass production host, or host where complete normalized IP set shares addresses with production; verify script halts immediately before connection.<br>**Neg 2:** Either DNS resolution fails or returns empty address set; verify script fails closed immediately.<br>**Neg 3:** Pass disallowed environment (`TARGET_ENV=production`); verify script halts immediately.<br>**Neg 4:** Pass corrupted archive; verify clean atomic rollback.<br>**Neg 5:** Backup contains orphan approved_by or reversed_by; verify post-restore assertion aborts and fails pipeline. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
+| **P1-03** | Validated backup/restore runbook & automated assertions | Multi-layer target guard: mandatory explicit `TARGET_ENV` (fail fast if unset or not staging/development); authoritative target identity and project-to-endpoint mapping (`TARGET_DB_HOST` matches `db.${TARGET_PROJECT_ID}.supabase.co`); `TARGET_PROJECT_ID` distinct from production; direct `TARGET_HOST` vs `PROD_DB_HOST` comparison; secondary defense-in-depth fail-closed DNS resolution comparing complete normalized IP sets via `comm -12`; fail-fast `set -euo pipefail`; single transaction; topological FK order; exhaustive automated PL/pgSQL invariant assertions covering all member references and all public tables | Section 7.2 of plan, `scripts/restore_database.sh` | **Pos:** Execute `scripts/restore_database.sh` on verified backup targeting staging; automated PL/pgSQL assertions verify referential integrity across all member references (recorded, approved, reversed, verified, closed), financial invariants, and RLS on all public tables.<br>**Neg 1 (Missing TARGET_ENV):** Pass unset or empty `TARGET_ENV`; verify script halts immediately before connection with code 1.<br>**Neg 2 (Disallowed ENV):** Pass `TARGET_ENV=production`; verify script halts immediately before connection with code 1.<br>**Neg 3 (Host/Project Mismatch):** Pass declared project ID with mismatched target host; verify script aborts before connection with code 1.<br>**Neg 4 (Identical Project ID):** Pass `TARGET_PROJECT_ID=PROD_PROJECT_ID`; verify script halts immediately.<br>**Neg 5 (Direct Endpoint Match):** Pass `TARGET_DB_HOST=PROD_DB_HOST`; verify script halts immediately.<br>**Neg 6 (DNS Resolution Failure):** Target or production host fails DNS resolution; verify script fails closed immediately.<br>**Neg 7 (IP Address Overlap):** Target and prod hosts share IP in normalized sets; verify script halts immediately.<br>**Neg 8 (Corrupted Archive):** Pass corrupted archive; verify clean atomic rollback.<br>**Neg 9 (Orphan FK):** Backup contains orphan approved_by or reversed_by; verify post-restore assertion aborts and fails pipeline.<br>**Neg 10 (Disabled RLS):** Public table has RLS disabled; verify post-restore assertion aborts and fails pipeline. | Recovery Gate | **NOT EXECUTED** *(Scheduled for Recovery Gate)* |
 | **P1-04** | Comprehensive preflight validation | Machine-verifiable script validating extensions (3), core tables (10), columns/types (`audit_logs.actor_type varchar(50)`), triggers (6), security functions (3), index uniqueness (`idx_members_email_lower` `indisunique = true` on `LOWER(email)`), constraint uniqueness (`uq_reference_payment`), HNSW embedding index (`idx_constitution_embedding_hnsw` on `embedding` with `vector_cosine_ops`), and active RLS on all 10 tables | Section 8.1 of plan | **Pos:** Script runs cleanly against complete schema baseline, asserting column types, index uniqueness, and indexed expressions.<br>**Neg 1:** Drop table, column, trigger, or index/constraint; verify script raises fatal validation exception.<br>**Neg 2:** Recreate email index without uniqueness or without `LOWER(email)`; verify script raises fatal validation exception.<br>**Neg 3:** Disable RLS on any public table; verify script raises fatal validation exception. | Schema Gate | **NOT EXECUTED** *(Scheduled for Schema Gate)* |
-| **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate | **NOT EXECUTED** *(Scheduled for RAG Gate)* |
 | **P1-05** | Calibrated RAG threshold floor test | Server-enforced minimum floor 0.68; controlled mock embedding tests | `007_constitution_rag.sql` | **Pos:** Qualifying match ($0.82 \ge 0.68$) returned when client requests 0.50.<br>**Neg:** Candidate at $0.6799$ excluded; all candidates $< 0.68$ return 0 rows and trigger abstention. | RAG Gate | **NOT EXECUTED** *(Scheduled for RAG Gate)* |
 
 ---

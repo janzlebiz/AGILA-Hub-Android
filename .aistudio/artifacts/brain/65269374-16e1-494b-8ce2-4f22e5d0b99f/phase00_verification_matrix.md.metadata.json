@@ -1,6 +1,6 @@
 {
-  "summary": "AGILA Hub Android — Phase 00 Verification Matrix, Revision 3.10. Confirms 100% of architectural controls and DDL specifications are PASS (including schema-aligned preflight index checks for idx_constitution_embedding_hnsw, idx_members_email_lower, and uq_reference_payment, and authoritative restore endpoint verification), and keeps all 16 runtime release gate tests and disaster recovery drills explicitly marked NOT EXECUTED until execution during live phase gates.",
-  "updatedAt": "2026-10-13T21:30:00.000000000Z",
+  "summary": "AGILA Hub Android — Phase 00 Verification Matrix, Revision 3.11. Confirms 100% of architectural controls and DDL specifications are PASS (including mandatory explicit TARGET_ENV, authoritative project-to-endpoint identity mapping verification, schema-aligned preflight index checks for idx_constitution_embedding_hnsw, idx_members_email_lower, and uq_reference_payment), and keeps all 16 runtime release gate tests and disaster recovery drills explicitly marked NOT EXECUTED until execution during live phase gates.",
+  "updatedAt": "2026-10-13T21:35:00.000000000Z",
   "requestFeedback": false,
   "userFacing": true
 }

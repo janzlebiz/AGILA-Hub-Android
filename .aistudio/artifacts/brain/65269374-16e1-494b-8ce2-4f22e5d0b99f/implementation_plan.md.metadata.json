@@ -1,6 +1,6 @@
 {
-  "summary": "AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan, Revision 3.10 (HNSW Index Alignment & Authoritative Restore Guard Specification). Fully reconciles preflight assertions with actual schema definitions (idx_members_email_lower on LOWER(email) with indisunique=true, uq_reference_payment on (payment_channel, reference_number), and idx_constitution_embedding_hnsw with HNSW vector_cosine_ops on public.constitution_sections.embedding), defines authoritative target-project identity verification with secondary DNS/IP overlap defense-in-depth in the restore runbook, and keeps all runtime tests and drills marked NOT EXECUTED.",
-  "updatedAt": "2026-10-13T21:30:00.000000000Z",
+  "summary": "AGILA Hub Android — Phase 00 Master Architecture & Implementation Plan, Revision 3.11 (Explicit TARGET_ENV & Authoritative Target Identity Mapping). Fully reconciles preflight assertions with actual schema definitions (idx_members_email_lower on LOWER(email) with indisunique=true, uq_reference_payment on (payment_channel, reference_number), and idx_constitution_embedding_hnsw with HNSW vector_cosine_ops on public.constitution_sections.embedding), defines mandatory explicit TARGET_ENV enforcement with no implicit defaults and authoritative project-to-endpoint mapping verification with secondary DNS/IP overlap defense-in-depth in scripts/restore_database.sh and Section 7.2, specifies comprehensive negative test fixtures (including missing TARGET_ENV and hostname/project-ID mismatch), and keeps all runtime tests and drills marked NOT EXECUTED.",
+  "updatedAt": "2026-10-13T21:35:00.000000000Z",
   "requestFeedback": true,
   "userFacing": true
 }

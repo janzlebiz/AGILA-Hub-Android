@@ -1,4 +1,4 @@
-# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.10)
+# AGILA Hub Android — Phase 00 Remediation Traceability Matrix (Revision 3.11)
 **Document:** Final Phase 00 Remediation Traceability (`remediation_traceability.md`)  
 **Status:** Implementation-Ready Planning Traceability (Awaiting Stakeholder Approval)  
 **Scope:** Reconciled against Migrations 001 through 009, Preflight Checks, and Operational Procedures
@@ -91,18 +91,22 @@
 
 ---
 
-### 5. Restore Safety: Fail-Closed DNS Resolution, Address Set Comparison & Exhaustive Invariants
+### 5. Restore Safety: Explicit TARGET_ENV, Authoritative Project Mapping, Fail-Closed DNS & Exhaustive Invariants
 *   **Defect & Impact:**
-    1. Previous restore script continued execution if DNS lookup failed or returned empty addresses, failing open rather than fail-closed.
-    2. Comparing only the first resolved IP could fail to detect multi-homed or overlapping address sets between target and production endpoints.
+    1. Previous restore script used an implicit default `TARGET_ENV="${TARGET_ENV:-staging}"`, permitting execution when `TARGET_ENV` was omitted.
+    2. Previous guard compared `TARGET_PROJECT_ID` with `PROD_PROJECT_ID` and hostnames, but did not enforce authoritative verification that `TARGET_DB_HOST` strictly belongs to the declared `TARGET_PROJECT_ID`.
+    3. DNS checks must fail closed on lookup failure or empty results, and address sets must be compared completely via `comm -12`.
 *   **Source Location:** Section 7.2 of `implementation_plan.md` and `scripts/restore_database.sh`
 *   **Corrected Documentation & Control:**
     - **Fail-Fast Shell Handling:** Enforces `set -euo pipefail` at script start.
-    - **Primary Authoritative Target-Project Identity Verification:**
-      - Requires non-empty `PROD_DB_HOST` and `TARGET_PROJECT_ID`.
+    - **Mandatory Explicit Target Environment (`TARGET_ENV`):**
+      - `TARGET_ENV` must be explicitly declared (`staging` or `development`). Implicit defaults are strictly removed; if unset or empty, the script aborts immediately with exit code 1.
+      - Production environment is strictly disallowed (`TARGET_ENV=production` immediately aborts).
+    - **Primary Authoritative Target Identity & Project-to-Endpoint Mapping:**
+      - Requires non-empty `PROD_DB_HOST`, `PROD_PROJECT_ID`, and `TARGET_PROJECT_ID`.
       - Authoritatively rejects if `TARGET_PROJECT_ID == PROD_PROJECT_ID`.
-      - Enforces strict whitelist: `TARGET_ENV` must explicitly equal `staging` or `development`.
-      - Compares `TARGET_DB_HOST` directly against `PROD_DB_HOST`.
+      - Authoritatively validates that `TARGET_DB_HOST` strictly belongs to declared `TARGET_PROJECT_ID` using the trusted platform endpoint mapping (`EXPECTED_TARGET_HOST="db.${TARGET_PROJECT_ID}.supabase.co"`). Any mismatch halts execution before connection.
+      - Directly compares `TARGET_HOST` against authoritative `PROD_DB_HOST`.
       - Requires valid credentials for the authoritative target environment before connecting.
     - **Secondary Defense-in-Depth (Fail-Closed DNS Set Comparison):**
       - Documented that IP overlap is only a secondary signal (multi-tenant cloud ingress or proxy pools may share IPs; conversely aliases may route to prod). Authoritative target-project/endpoint identity verification above is the primary prerequisite before connecting.
@@ -119,11 +123,14 @@
       - Verifies active RLS (`rowsecurity = TRUE`) across **ALL public tables** in `pg_tables`.
       - Raises fatal SQL exception if any invariant fails, causing `psql` to exit non-zero.
 *   **Acceptance Test Fixtures:**
-    - *Positive Fixture 1 (Valid Staging Execution):* Script executes with `TARGET_ENV=staging`, `TARGET_DB_HOST=db.staging-ref.supabase.co`, `PROD_DB_HOST=db.prod-ref.supabase.co`. Both resolve to distinct non-empty IP sets. Expected: all endpoint guards pass, restore executes within single transaction, and post-restore assertion executes cleanly with notice.
-    - *Negative Fixture 1 (DNS Resolution Failure Abort):* Pass unresolvable target host. Expected: script fails closed immediately with `FATAL: DNS resolution failed or returned empty address set for TARGET_HOST`.
-    - *Negative Fixture 2 (Complete Address Set Overlap Abort):* Pass target host where any resolved IP matches an IP in the production address set. Expected: script aborts immediately with `FATAL: Endpoint alias detected! TARGET_HOST shares resolved IP address(es) with PROD_DB_HOST`.
-    - *Negative Fixture 3 (Direct Endpoint Match):* Pass `TARGET_DB_HOST=PROD_DB_HOST`. Expected: terminates immediately before connection with `FATAL: TARGET_HOST matches trusted production endpoint`.
-    - *Negative Fixture 4 (Disallowed Environment):* Pass `TARGET_ENV=production`. Expected: terminates immediately with `FATAL: TARGET_ENV must be 'staging' or 'development'`.
-    - *Negative Fixture 5 (Orphan approved_by / reversed_by FK):* Database backup contains an expense row with `approved_by` or `reversed_by` referencing non-existent member. Expected: post-restore assertion raises fatal exception and fails script.
-    - *Negative Fixture 6 (Disabled Public Table RLS):* Database target has `rowsecurity = FALSE` on any public table. Expected: post-restore assertion raises fatal exception and fails script.
+    - *Positive Fixture 1 (Valid Staging Execution):* Script executes with `TARGET_ENV=staging`, `TARGET_PROJECT_ID=agila-hub-staging`, `TARGET_DB_HOST=db.agila-hub-staging.supabase.co`, `PROD_PROJECT_ID=agila-hub-prod`, `PROD_DB_HOST=db.agila-hub-prod.supabase.co`. Both resolve to distinct non-empty IP sets. Expected: all endpoint guards pass, restore executes within single transaction, and post-restore assertion executes cleanly with notice.
+    - *Negative Fixture 1 (Missing TARGET_ENV Abort):* Unset or empty `TARGET_ENV`. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_ENV is unset or empty. Explicit environment ('staging' or 'development') is required. Aborted.`
+    - *Negative Fixture 2 (Disallowed Environment Abort):* Pass `TARGET_ENV=production`. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_ENV must be explicitly 'staging' or 'development' (received 'production'). Production restores are blocked.`
+    - *Negative Fixture 3 (Hostname / Project-ID Mismatch Abort):* Pass `TARGET_PROJECT_ID=agila-hub-staging` and mismatched `TARGET_DB_HOST=db.agila-hub-prod.supabase.co` (or any endpoint not matching `db.${TARGET_PROJECT_ID}.supabase.co`). Expected: terminates immediately before connection with exit code 1 and error `FATAL: Authoritative target identity verification failed! TARGET_DB_HOST ... does not match authoritative endpoint for TARGET_PROJECT_ID ...`.
+    - *Negative Fixture 4 (Target Project Matches Prod Project Abort):* Pass `TARGET_PROJECT_ID=PROD_PROJECT_ID`. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('agila-hub-prod'). Production restores are strictly forbidden. Aborted.`
+    - *Negative Fixture 5 (Direct Endpoint Match Abort):* Pass `TARGET_DB_HOST=PROD_DB_HOST`. Expected: terminates immediately before connection with exit code 1 and error `FATAL: TARGET_HOST matches trusted production endpoint`.
+    - *Negative Fixture 6 (Fail-Closed DNS Resolution Failure Abort):* Pass unresolvable target host. Expected: script fails closed immediately with `FATAL: DNS resolution failed or returned empty address set for TARGET_HOST`.
+    - *Negative Fixture 7 (Address Set Overlap Abort):* Pass target host where any resolved IP matches an IP in the production address set. Expected: script aborts immediately with `FATAL: Endpoint alias detected! TARGET_HOST shares resolved IP address(es) with PROD_DB_HOST`.
+    - *Negative Fixture 8 (Orphan approved_by / reversed_by FK):* Database backup contains an expense row with `approved_by` or `reversed_by` referencing non-existent member. Expected: post-restore assertion raises fatal exception and fails script.
+    - *Negative Fixture 9 (Disabled Public Table RLS):* Database target has `rowsecurity = FALSE` on any public table. Expected: post-restore assertion raises fatal exception and fails script.
 *   **Execution Status:** Runbook specification, SQL DDL, and test fixtures verified. Runtime execution: **NOT EXECUTED (SPECIFIED FOR RECOVERY RELEASE GATE IN PHASE 07)**.

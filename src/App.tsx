@@ -43,7 +43,7 @@ export default function App() {
 
   const tabs: TabItem[] = [
     { id: 'overview', label: 'Executive Overview', icon: Layers },
-    { id: 'remediations', label: 'Remediations (3.10)', icon: Shield },
+    { id: 'remediations', label: 'Remediations (3.11)', icon: Shield },
     { id: 'matrix', label: 'Verification Matrix', icon: FileCheck },
     { id: 'migrations', label: 'SQL Migrations (001-009)', icon: Database },
     { id: 'preflight', label: 'Preflight Script', icon: Terminal },
@@ -107,16 +107,17 @@ export default function App() {
     },
     {
       id: 'REM-05',
-      title: 'Restore Safety: Authoritative Endpoint Identity & Fail-Closed Guards',
+      title: 'Restore Safety: Explicit TARGET_ENV & Authoritative Identity Mapping',
       category: 'Disaster Recovery',
       location: 'scripts/restore_database.sh & Section 7.2',
-      problem: 'Previous restore script checked constructed substrings, failed open if DNS lookup returned empty, and checked only 4 tables for RLS.',
-      solution: 'Enforces set -euo pipefail, primary authoritative target-project identity verification (TARGET_PROJECT_ID, TARGET_ENV, TARGET_DB_HOST vs PROD_DB_HOST), secondary defense-in-depth DNS set comparison via comm -12, atomic single-transaction restore, and exhaustive PL/pgSQL assertions across ALL member references and ALL public tables.',
+      problem: 'Previous restore script allowed implicit staging fallback (TARGET_ENV="${TARGET_ENV:-staging}"), lacked authoritative verification that TARGET_DB_HOST belongs to TARGET_PROJECT_ID, and failed open on empty DNS lookups.',
+      solution: 'Enforces set -euo pipefail, mandatory explicit TARGET_ENV ("staging" or "development" only with no default), authoritative project-to-endpoint identity mapping (TARGET_DB_HOST must match db.${TARGET_PROJECT_ID}.supabase.co), direct PROD_DB_HOST inequality check, secondary fail-closed DNS set comparison via comm -12, and exhaustive PL/pgSQL assertions across ALL public tables and member references.',
       status: 'VERIFIED BY SPECIFICATION',
       tests: [
         { type: 'Positive', name: 'Valid Staging Execution', desc: 'Executes restore on verified backup targeting staging; automated PL/pgSQL assertions verify all foreign keys, financial invariants, and RLS.' },
-        { type: 'Negative', name: 'DNS Resolution Failure / IP Overlap', desc: 'Host resolution failure or IP overlap between target and production halts immediately before connection with FATAL.' },
-        { type: 'Negative', name: 'Disabled Public Table RLS', desc: 'Any public table with rowsecurity = FALSE raises fatal post-restore exception and fails script.' }
+        { type: 'Negative', name: 'Missing TARGET_ENV Abort', desc: 'Executing with unset or empty TARGET_ENV immediately terminates before connection with exit code 1.' },
+        { type: 'Negative', name: 'Hostname / Project-ID Mismatch', desc: 'Declared TARGET_PROJECT_ID with mismatched TARGET_DB_HOST immediately halts before connection with exit code 1.' },
+        { type: 'Negative', name: 'DNS Resolution Failure / IP Overlap', desc: 'Host resolution failure or IP overlap between target and production halts immediately before connection with exit code 1.' }
       ]
     }
   ];
@@ -130,7 +131,7 @@ export default function App() {
     { id: 'REV-03-B', requirement: 'Expense attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive approval/reversal and negative tampering tests specified' },
     { id: 'REV-04-A', requirement: 'Contribution verification attribution', target: 'Migration 006 (protect_payment_state_transitions)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'verified_by preserved; closed_by/at tracked with void reason' },
     { id: 'REV-04-B', requirement: 'Contribution attribution runtime tests', target: 'Financial Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Financial Gate', notes: 'Positive verification/voiding and negative spoofing tests specified' },
-    { id: 'REV-05-A', requirement: 'Authoritative endpoint isolation & exhaustive invariant checks', target: 'scripts/restore_database.sh & Section 7.2', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Primary target-project verification, secondary DNS/IP set check, all-public-table RLS, expense approved/reversed checks' },
+    { id: 'REV-05-A', requirement: 'Authoritative endpoint isolation & exhaustive invariant checks', target: 'scripts/restore_database.sh & Section 7.2', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Mandatory explicit TARGET_ENV, authoritative project-to-endpoint mapping, secondary DNS/IP set check, all-public-table RLS, full member FK checks' },
     { id: 'REV-05-B', requirement: 'Live restore runbook execution & drill', target: 'Recovery Test Suite in Section 9', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Recovery Gate', notes: 'Staging restore drill scheduled for Phase 07 on Supabase Pro' },
     { id: 'P0-03-A', requirement: 'Member identity protection trigger', target: 'Migration 002 (protect_member_sensitive_columns)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Privilege Gate', notes: 'Self-service restricted to nickname/avatar only' },
     { id: 'P1-02-A', requirement: 'Attendance verification attribution', target: 'Migration 005 (validate_attendance_record_mutation)', specStatus: 'PASS', runtimeStatus: 'NOT EXECUTED', gate: 'Attendance Gate', notes: 'Server forces verified_by := v_caller.member_id' },
@@ -162,7 +163,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight text-white">AGILA Hub Android</span>
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Revision 3.10
+                  Revision 3.11
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Production Architecture & Testable Baseline Specification</p>
@@ -205,7 +206,7 @@ export default function App() {
 
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Reconciled: HNSW Index & Authoritative Restore Guard
+            Reconciled: Explicit TARGET_ENV & Authoritative Identity Mapping
           </div>
         </div>
 
@@ -216,13 +217,13 @@ export default function App() {
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 <div className="space-y-2 max-w-3xl">
                   <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-300 text-xs font-semibold border border-sky-500/20">
-                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.10 Production Specification
+                    <Sparkles className="w-3.5 h-3.5" /> Revision 3.11 Production Specification
                   </div>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                     TFOE-PE Bantayog Elite Eagles Club Android Platform
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions for idx_constitution_embedding_hnsw, audit payload sources, and authoritative restore endpoint verification are completely reconciled.
+                    AGILA Hub Android is an independent, native mobile platform built with React Native (Expo SDK 52+), Supabase (PostgreSQL 16, pgvector, GoTrue Auth), and EAS Build. Preflight index assertions for idx_constitution_embedding_hnsw, audit payload sources, mandatory explicit TARGET_ENV enforcement, and authoritative restore endpoint verification are completely reconciled.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[240px]">
@@ -242,7 +243,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 5 Pillars of Revision 3.10 */}
+            {/* 4 Pillars of Revision 3.11 */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-sky-400 font-bold text-xs uppercase tracking-wider">1. Aligned HNSW & Email Indexes</div>
@@ -253,7 +254,7 @@ export default function App() {
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Authoritative Target Guard</div>
                 <p className="text-xs text-slate-300">
-                  Primary authoritative target-project identity check (<code className="text-emerald-300">TARGET_PROJECT_ID</code>, whitelist, <code className="text-amber-300">PROD_DB_HOST</code> comparison) with secondary <code className="text-purple-300">comm -12</code> IP overlap defense.
+                  Mandatory explicit <code className="text-emerald-300">TARGET_ENV</code> (no default), authoritative project mapping (<code className="text-sky-300">TARGET_DB_HOST</code> matches <code className="text-sky-300">db.$&#123;TARGET_PROJECT_ID&#125;.supabase.co</code>), and secondary fail-closed <code className="text-purple-300">comm -12</code> IP defense.
                 </p>
               </div>
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
@@ -275,7 +276,7 @@ export default function App() {
         {/* Tab 2: Remediations */}
         {activeTab === 'remediations' && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.10)</h2>
+            <h2 className="text-xl font-bold text-white">Targeted Remediations (Revision 3.11)</h2>
             <div className="space-y-4">
               {remediations.map((rem) => (
                 <div key={rem.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
@@ -600,37 +601,49 @@ END $$;`}
             <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 overflow-x-auto">
               <pre>
 {`#!/usr/bin/env bash
+# Revision 3.11: Explicit TARGET_ENV & Authoritative Identity Mapping
 set -euo pipefail
 
-# 1. Independent Production Endpoint & Whitelist Guards
+# 1. Enforce Mandatory TARGET_ENV (No implicit default)
+if [ -z "\${TARGET_ENV:-}" ]; then
+    echo "FATAL: TARGET_ENV is unset or empty. Explicit environment ('staging' or 'development') is required. Aborted." >&2
+    exit 1
+fi
+if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
+    echo "FATAL: TARGET_ENV must be explicitly 'staging' or 'development' (received '$TARGET_ENV'). Production restores are blocked." >&2
+    exit 1
+fi
+
+# 2. Enforce Mandatory Project IDs & Authoritative Production Endpoint
 if [ -z "\${TARGET_PROJECT_ID:-}" ]; then
-    echo "FATAL: TARGET_PROJECT_ID is unset. Aborted." >&2
+    echo "FATAL: TARGET_PROJECT_ID is unset or empty. Aborted." >&2
     exit 1
 fi
 if [ -z "\${PROD_PROJECT_ID:-}" ]; then
-    echo "FATAL: PROD_PROJECT_ID is unset. Aborted." >&2
+    echo "FATAL: PROD_PROJECT_ID is unset or empty. Cannot verify production isolation guard." >&2
     exit 1
 fi
 if [ -z "\${PROD_DB_HOST:-}" ]; then
-    echo "FATAL: PROD_DB_HOST is unset. Authoritative production endpoint required." >&2
+    echo "FATAL: PROD_DB_HOST is unset or empty. Authoritative production endpoint required." >&2
     exit 1
 fi
 
 # Primary Gate 1: Authoritative target-project identity check
 if [ "$TARGET_PROJECT_ID" = "$PROD_PROJECT_ID" ]; then
-    echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Aborted." >&2
+    echo "FATAL: TARGET_PROJECT_ID equals PROD_PROJECT_ID ('$TARGET_PROJECT_ID'). Production restores are strictly forbidden. Aborted." >&2
     exit 1
 fi
 
-# Primary Gate 2: Strict environment target whitelist
-TARGET_ENV="\${TARGET_ENV:-staging}"
-if [ "$TARGET_ENV" != "staging" ] && [ "$TARGET_ENV" != "development" ]; then
-    echo "FATAL: TARGET_ENV must be 'staging' or 'development' (received '$TARGET_ENV')." >&2
+# Primary Gate 2: Authoritative Project-to-Endpoint Mapping Verification
+EXPECTED_TARGET_HOST="db.\${TARGET_PROJECT_ID}.supabase.co"
+TARGET_HOST="\${TARGET_DB_HOST:-\$EXPECTED_TARGET_HOST}"
+
+if [ "$TARGET_HOST" != "$EXPECTED_TARGET_HOST" ]; then
+    echo "FATAL: Authoritative target identity verification failed! TARGET_DB_HOST ('$TARGET_HOST') does not match authoritative endpoint for TARGET_PROJECT_ID ('$TARGET_PROJECT_ID') [Expected: '$EXPECTED_TARGET_HOST']. Aborted." >&2
     exit 1
 fi
 
-# Primary Gate 3: Direct authoritative endpoint verification
-TARGET_HOST="\${TARGET_DB_HOST:-db.\${TARGET_PROJECT_ID}.supabase.co}"
+# Primary Gate 3: Direct authoritative endpoint verification against production
 if [ "$TARGET_HOST" = "$PROD_DB_HOST" ]; then
     echo "FATAL: TARGET_HOST ('$TARGET_HOST') matches trusted production endpoint ('$PROD_DB_HOST'). Aborted." >&2
     exit 1
@@ -755,7 +768,7 @@ EOF`}
 
       {/* Footer */}
       <footer className="border-t border-slate-800 bg-slate-950 py-4 px-4 text-center text-xs text-slate-500">
-        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.10 Baseline
+        AGILA Hub Android — Phase 00 Architecture & Implementation Specification • Revision 3.11 Baseline
       </footer>
     </div>
   );
