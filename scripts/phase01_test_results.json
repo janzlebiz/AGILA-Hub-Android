@@ -324,9 +324,9 @@
   {
     "suite": "Preflight Script",
     "id": "PRE-TBL-CONST-VERSIONS",
-    "name": "Preflight Checks public.constitution_versions Presence & RLS",
+    "name": "Preflight Checks constitution_versions in v_expected_tables & Shared Loop Parity",
     "status": "PASS",
-    "evidence": "Verified v_expected_tables includes constitution_versions and constitution_sections"
+    "evidence": "Verified constitution_versions is present in v_expected_tables (11 core tables declared) and confirmed the exact same array is used by both table-presence (Sec 2) and RLS (Sec 7) loops"
   },
   {
     "suite": "Preflight Script",
@@ -420,73 +420,101 @@
     "evidence": "Exited with code 1, message: matches trusted production endpoint"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_CORE_T",
-    "name": "Migration 20261013000001_core_types_and_extensions.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000001_core_types_and_extensions.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 11 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 11 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_MEMBER",
-    "name": "Migration 20261013000002_members_and_directory.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000002_members_and_directory.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 16 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 16 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_INVITA",
-    "name": "Migration 20261013000003_invitations_and_auth.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000003_invitations_and_auth.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 7 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 7 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_EAGLES",
-    "name": "Migration 20261013000004_eagles_id_storage.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000004_eagles_id_storage.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 8 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 8 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_ANNOUN",
-    "name": "Migration 20261013000005_announcements_and_attendance.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000005_announcements_and_attendance.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 14 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 14 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_FINANC",
-    "name": "Migration 20261013000006_financial_records.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000006_financial_records.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 13 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 13 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_CONSTI",
-    "name": "Migration 20261013000007_constitution_rag.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000007_constitution_rag.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 7 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 7 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_AUDIT_",
-    "name": "Migration 20261013000008_audit_logs_and_triggers.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000008_audit_logs_and_triggers.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 23 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 23 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-_RLS_AN",
-    "name": "Migration 20261013000009_rls_and_storage_policies.sql Validates PostgreSQL AST Syntax",
+    "name": "Migration 20261013000009_rls_and_storage_policies.sql Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 82 AST statement(s) with zero syntax errors via libpg_query"
+    "evidence": "Parsed 82 top-level AST statement(s) via libpg_query (procedural bodies parsed as string constants)"
   },
   {
-    "suite": "SQL Syntax Validation",
+    "suite": "Top-Level SQL AST Validation",
     "id": "SYNTAX-PREFLIGHT",
-    "name": "Preflight Script Validates PostgreSQL AST Syntax",
+    "name": "Preflight Script Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 1 DO-block statement with zero syntax errors via libpg_query"
+    "evidence": "Parsed 1 top-level DO-block statement via libpg_query (inner PL/pgSQL verified in Suite 7)"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-BLOCK-BALANCE",
+    "name": "Balanced Block & Control Flow Structures across All Functions & DO Blocks",
+    "status": "PASS",
+    "evidence": "Verified 14 functions (13 PL/pgSQL, 1 SQL) and 9 DO blocks have matching BEGIN/END, IF/END IF, and LOOP/END LOOP constructs"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-SECURITY-SEARCHPATH",
+    "name": "Explicit search_path Lockdown on all SECURITY DEFINER Functions",
+    "status": "PASS",
+    "evidence": "Verified all 14 SECURITY DEFINER functions explicitly lock down search_path to eliminate search_path hijacking vulnerabilities"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-EMBEDDED-SQL",
+    "name": "Embedded Query Syntax AST Validation across Procedural Functions",
+    "status": "PASS",
+    "evidence": "Verified representative embedded queries inside functions and DO blocks parse cleanly into valid AST representations via libpg_query"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-PREFLIGHT-DO-BLOCK",
+    "name": "Offline Structural & Procedural Validation of preflight_schema_check.sql DO Block",
+    "status": "PASS",
+    "evidence": "Verified preflight DO-block DECLARE array initialization, 11-table array declaration, paired table-presence & RLS FOREACH loops, and exception/notice emission"
   }
 ]

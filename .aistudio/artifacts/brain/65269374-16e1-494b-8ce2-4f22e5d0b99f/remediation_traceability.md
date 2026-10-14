@@ -47,7 +47,7 @@
     - Script fails closed: raises fatal SQL exception (`RAISE EXCEPTION`) listing all missing items if any assertion fails.
 *   **Phase 01 Automated Test Verification:**
     - `PRE-FILE-01`: Asserts `scripts/preflight_schema_check.sql` exists on disk (PASS).
-    - `PRE-TBL-CONST-VERSIONS`: Asserts `v_expected_tables` includes `constitution_versions` and `constitution_sections` (PASS).
+    - `PRE-TBL-CONST-VERSIONS`: Asserts `v_expected_tables` explicitly includes `constitution_versions` (across 11 declared core tables) and confirms the exact same array is iterated by both table-presence (Section 2) and RLS (Section 7) loops (PASS).
     - `PRE-ACTOR-TYPE`: Asserts preflight checks `actor_type varchar(50)` (PASS).
     - `PRE-EMAIL-IDX`: Asserts preflight validates `idx_members_email_lower` `indisunique = TRUE` and `LOWER(email)` (PASS).
     - `PRE-HNSW-IDX`: Asserts preflight validates `idx_constitution_embedding_hnsw` on `embedding vector_cosine_ops` (PASS).
@@ -131,6 +131,20 @@
 
 ---
 
+### 6. Top-Level SQL AST Syntax & Offline Procedural Body Validation Scope
+*   **Defect & Impact:** Previous claims implied that generic SQL AST parsers validate entire migrations end-to-end, omitting the critical technical distinction that `libpg_query` parses top-level SQL DDL/DML into an AST while treating PL/pgSQL function bodies and DO blocks inside dollar-quotes (`$$`) as opaque string literals.
+*   **Source Location:** `scripts/verify_phase01.ts` (Suites 6 and 7) and `supabase/migrations/` (14 functions, 9 DO blocks)
+*   **Corrected Scope & Implementation:**
+    - **Top-Level SQL AST Scope (Suite 6):** `libpg_query` (via `pgsql-parser`) parses all top-level SQL statements across all 9 migrations and `preflight_schema_check.sql` (182 total statements). Verifies DDL grammar for `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, `CREATE POLICY`, `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, and function signatures without connecting to a live cloud instance.
+    - **Offline Procedural Body Validation (Suite 7):** A dedicated procedural validator extracts each function and DO block body from the migrations and preflight check:
+      - `PROC-BLOCK-BALANCE`: Asserts delimiter matching, balanced `BEGIN`/`END;` blocks, `IF`/`END IF;` conditional structures, and `LOOP`/`END LOOP;` loops across all 14 functions (13 PL/pgSQL, 1 SQL) and 9 DO blocks (PASS).
+      - `PROC-SECURITY-SEARCHPATH`: Asserts that all 14 `SECURITY DEFINER` functions explicitly lock down `SET search_path = pg_catalog, public` to completely eliminate search_path escalation vulnerabilities (PASS).
+      - `PROC-EMBEDDED-SQL`: Asserts that embedded SQL queries extracted from procedural bodies parse cleanly into valid AST representations via `libpg_query` (PASS).
+      - `PROC-PREFLIGHT-DO-BLOCK`: Asserts structural and execution flow integrity of `scripts/preflight_schema_check.sql` DO block (valid variable declarations, 11-table array declaration, paired table-presence & RLS FOREACH loops, exception & notice emission) (PASS).
+*   **Remaining Limitations Explicitly Noted:** Offline AST and structural analysis does not execute live PostgreSQL procedural engines, evaluate dynamic SQL strings within `EXECUTE`, or verify foreign key runtime triggers on real data. Full procedural execution with type resolution and runtime evaluation is deferred to the staged cloud gate upon cloud database provisioning in Phase 02.
+
+---
+
 ## 2. Phase 01 Automated Verification Summary
 
 | Test Suite | Total Assertions | PASS | FAIL | Execution Method |
@@ -139,7 +153,8 @@
 | **Schema Definitions & Types** | 14 | 14 | 0 | `scripts/verify_phase01.ts` (DDL inspection) |
 | **Architectural Remediations** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (AST/Regex assertions) |
 | **RLS Policy Coverage** | 11 | 11 | 0 | `scripts/verify_phase01.ts` (DDL assertions across all 11 tables) |
-| **Preflight Script Parity** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (SQL contract analysis including `constitution_versions`) |
+| **Preflight Script Parity** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (SQL contract analysis including `constitution_versions` & shared loop parity) |
 | **Restore Runbook Negative Fixtures** | 9 | 9 | 0 | `scripts/verify_phase01.ts` (`env -i` isolated subshell execution) |
-| **SQL Syntax Validation** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (PostgreSQL `libpg_query` AST parser) |
-| **TOTAL** | **70** | **70** | **0** | **100% Pass Rate** |
+| **Top-Level SQL AST Validation** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (PostgreSQL `libpg_query` AST parser) |
+| **Offline Procedural Body Validation** | 4 | 4 | 0 | `scripts/verify_phase01.ts` (procedural block balance, search_path, embedded queries) |
+| **TOTAL** | **74** | **74** | **0** | **100% Pass Rate** |

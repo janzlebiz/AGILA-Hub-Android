@@ -1,6 +1,6 @@
 # AGILA Hub Android — Master Architecture & Phase 01 Implementation Plan
 **Document Version:** Revision 4.1 (Phase 01 Verification Remediation Complete)  
-**Status:** Phase 01 Scope Implemented on Disk; 70/70 Automated Tests Verified (Release Gate 01 Passed)  
+**Status:** Phase 01 Scope Implemented on Disk; 74/74 Automated Tests Verified (Release Gate 01 Passed)  
 **Target Platform:** Android (React Native + Expo SDK 52+ + TypeScript)  
 **Backend:** Supabase (PostgreSQL 16, GoTrue Auth, Storage, Edge Functions, pgvector)  
 **Web Admin:** React (Vite / Next.js) on Vercel *(Desktop Administration Only — NOT an Android Builder)*  
@@ -19,7 +19,7 @@ AGILA Hub Android is an independent, native mobile platform for The Fraternal Or
 4. **Account & Registration Governance:** Invitation-only activation. Public self-registration is permanently disabled at the Supabase Auth gateway. Administrators create canonical member records, and prospective users activate their accounts via single-use cryptographic invitation tokens.
 5. **Financial Recording Scope:** The platform records payments conducted externally (cash, bank transfer, e-wallets) with text-only reference numbers. **Strictly zero payment gateways, online checkouts, or receipt-file uploads are required or implemented.**
 6. **Constitution RAG Governance:** Semantic retrieval over chunked TFOE-PE constitutional text stored in `pgvector` (`vector(768)`). The assistant answers solely with citations (Chapter, Article, Section) and abstains when evidence is missing or below the server-enforced minimum similarity threshold ($0.68$).
-7. **Phase 01 Execution & Governance Guard:** **Phase 01 core database migrations (`001` through `009`), preflight validation script (`scripts/preflight_schema_check.sql`), and restore database runbook (`scripts/restore_database.sh`) have been materialized on disk. 70 automated test assertions in `scripts/verify_phase01.ts` have been executed with 100% PASS, including complete environment isolation for negative restore fixtures and PostgreSQL AST syntax validation across all migrations.** No production infrastructure provisioning or live cloud database migrations were executed during Phase 01 in accordance with operational safeguards. All cloud runtime acceptance tests remain marked NOT EXECUTED for their designated cloud release gates.
+7. **Phase 01 Execution & Governance Guard:** **Phase 01 core database migrations (`001` through `009`), preflight validation script (`scripts/preflight_schema_check.sql`), and restore database runbook (`scripts/restore_database.sh`) have been materialized on disk. 74 automated test assertions in `scripts/verify_phase01.ts` have been executed with 100% PASS across 7 test suites, including complete environment isolation for negative restore fixtures, top-level PostgreSQL AST syntax validation, and offline PL/pgSQL procedural body structural and security verification across all migrations and preflight scripts.** No production infrastructure provisioning or live cloud database migrations were executed during Phase 01 in accordance with operational safeguards. All cloud runtime acceptance tests remain marked NOT EXECUTED for their designated cloud release gates.
 
 ---
 
@@ -2178,7 +2178,7 @@ END $$;
 
 ## 10. Mandatory Testable Release Gates
 
-1. **Schema Gate:** **PHASE 01 COMPLETED & VERIFIED (STATIC/CONTRACT PASS).** All 9 migrations (`001` through `009`) are materialized on disk in `supabase/migrations/` (total 63,972 bytes). `scripts/preflight_schema_check.sql` and `scripts/restore_database.sh` are materialized and verified. 70 automated test assertions in `scripts/verify_phase01.ts` pass cleanly (100%), including complete environment isolation for negative restore fixtures and PostgreSQL AST syntax validation across all migrations. Live cloud `supabase db push` execution is scheduled upon provisioning in Phase 02.
+1. **Schema Gate:** **PHASE 01 COMPLETED & VERIFIED (STATIC/CONTRACT PASS).** All 9 migrations (`001` through `009`) are materialized on disk in `supabase/migrations/` (total 63,972 bytes). `scripts/preflight_schema_check.sql` and `scripts/restore_database.sh` are materialized and verified. 74 automated test assertions in `scripts/verify_phase01.ts` pass cleanly (100%), including complete environment isolation for negative restore fixtures, top-level PostgreSQL AST syntax validation, and offline PL/pgSQL procedural body structural and security verification across all migrations. Live cloud `supabase db push` execution is scheduled upon provisioning in Phase 02.
 2. **Authorization Gate:** 100% pass on matrix testing across all 5 roles. Proves zero unauthorized row reads on private tables and expenses. *(Status: NOT EXECUTED - Scheduled for Cloud Auth Gate)*
 3. **Account-State Gate:** Proves accounts in `PENDING_INVITATION`, `INVITED`, `SUSPENDED`, and `DEACTIVATED` states cannot access protected endpoints. *(Status: NOT EXECUTED - Scheduled for Cloud Gate)*
 4. **Privilege Gate:** Proves non-admins cannot alter protected columns (`role`, `status`, names, chapter) or exploit `SECURITY DEFINER` functions; proves client-supplied identities are ignored. *(Status: NOT EXECUTED - Scheduled for Cloud Gate)*
@@ -2196,7 +2196,7 @@ END $$;
 ## 11. Final Acceptance Status & Human Prerequisites
 
 ### 11.1 Remediation Summary
-All technical architecture, database migrations, security policies, identity triggers, preflight checks, and backup runbooks have been implemented on disk and validated via 70 automated test assertions with zero failures.
+All technical architecture, database migrations, security policies, identity triggers, preflight checks, and backup runbooks have been implemented on disk and validated via 74 automated test assertions across 7 test suites with zero failures.
 
 ### 11.2 Prerequisites Requiring Human Action Prior to Live Cloud Provisioning (Phase 02)
 1. **Designation of Root Super-Admin Email:** Confirmation of the email address to receive initial bootstrap privileges.
@@ -2215,8 +2215,8 @@ All technical architecture, database migrations, security policies, identity tri
   - `20261013000008_audit_logs_and_triggers.sql` (10,820 bytes)
   - `20261013000009_rls_and_storage_policies.sql` (12,387 bytes)
 - **Validation Scripts on Disk (`scripts/`):**
-  - `scripts/preflight_schema_check.sql` (machine-verifiable PL/pgSQL assertions across 11 tables)
+  - `scripts/preflight_schema_check.sql` (machine-verifiable PL/pgSQL assertions across 11 tables with shared loop parity)
   - `scripts/restore_database.sh` (hardened transaction-safe restore runbook)
-  - `scripts/verify_phase01.ts` (Phase 01 test runner executing 70 assertions with isolated negative fixtures & AST parsing)
-- **Execution Evidence:** 70 assertions executed (`npm test`), 70 PASS, 0 FAIL.
+  - `scripts/verify_phase01.ts` (Phase 01 test runner executing 74 assertions across 7 suites with isolated negative fixtures, top-level AST parsing, and offline PL/pgSQL procedural validation)
+- **Execution Evidence:** 74 assertions executed (`npm test`), 74 PASS, 0 FAIL.
 - **Runtime Cloud Database Tests:** Marked **NOT EXECUTED** pending cloud provisioning.
