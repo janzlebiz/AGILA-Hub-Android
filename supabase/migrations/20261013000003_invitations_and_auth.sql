@@ -20,7 +20,7 @@ CREATE OR REPLACE FUNCTION public.activate_invited_account(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public, extensions
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_token_hash VARCHAR(64);

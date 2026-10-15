@@ -44,7 +44,7 @@ export const phase01TestResults: TestCase[] = [
     "id": "MIG-FILE-03",
     "name": "Migration File 20261013000003_invitations_and_auth.sql",
     "status": "PASS",
-    "evidence": "File exists with size 3074 bytes"
+    "evidence": "File exists with size 3062 bytes"
   },
   {
     "suite": "Migration Inventory",
@@ -511,23 +511,37 @@ export const phase01TestResults: TestCase[] = [
   {
     "suite": "Procedural Body Validation",
     "id": "PROC-BLOCK-BALANCE",
-    "name": "Balanced Block & Control Flow Structures across All Functions & DO Blocks",
+    "name": "Offline Structural Block Balance Check (BEGIN/END, IF/END IF, LOOP/END LOOP)",
     "status": "PASS",
-    "evidence": "Verified 14 functions (13 PL/pgSQL, 1 SQL) and 9 DO blocks have matching BEGIN/END, IF/END IF, and LOOP/END LOOP constructs"
+    "evidence": "Verified 14 functions (13 PL/pgSQL, 1 SQL) and 9 DO blocks pass offline structural delimiter balance checks without dangling blocks; PL/pgSQL runtime compilation is NOT EXECUTED"
   },
   {
     "suite": "Procedural Body Validation",
     "id": "PROC-SECURITY-SEARCHPATH",
-    "name": "Explicit search_path Lockdown on all SECURITY DEFINER Functions",
+    "name": "Approved pg_catalog, public search_path Lockdown on all SECURITY DEFINER Functions",
     "status": "PASS",
-    "evidence": "Verified all 14 SECURITY DEFINER functions explicitly lock down search_path to eliminate search_path hijacking vulnerabilities"
+    "evidence": "Verified all 14 SECURITY DEFINER functions explicitly declare SET search_path strictly matching approved 'pg_catalog, public' configuration (zero missing, different, or unsafe values)"
   },
   {
     "suite": "Procedural Body Validation",
-    "id": "PROC-EMBEDDED-SQL",
-    "name": "Embedded Query Syntax AST Validation across Procedural Functions",
+    "id": "PROC-NEG-SEARCHPATH",
+    "name": "Negative Test: search_path Validator Rejects Missing, Different, or Unsafe Configurations",
     "status": "PASS",
-    "evidence": "Verified representative embedded queries inside functions and DO blocks parse cleanly into valid AST representations via libpg_query"
+    "evidence": "Verified validator strictly rejects missing search_path, single-schema public, user-controlled mutable \"$user\", and unapproved extensions additions"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-REPRESENTATIVE-SQL",
+    "name": "Representative Query Syntax AST Validation via libpg_query",
+    "status": "PASS",
+    "evidence": "Verified 6 representative SQL queries embedded within functions and DO blocks parse cleanly into valid AST representations via libpg_query (accurately scoped to representative query syntax validation)"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-NEG-EMBEDDED-SQL",
+    "name": "Negative Test: Embedded Query Validator Rejects Malformed SQL Input",
+    "status": "PASS",
+    "evidence": "Verified libpg_query AST parser throws fatal PostgreSQL syntax errors when evaluating malformed SQL strings ('SELECT FROM WHERE', 'INSERT INTO;', 'CREATE TABLE (id);')"
   },
   {
     "suite": "Procedural Body Validation",
@@ -556,9 +570,9 @@ export const phase01Migrations: MigrationItem[] = [
   {
     "num": 3,
     "file": "20261013000003_invitations_and_auth.sql",
-    "size": 3074,
+    "size": 3062,
     "lines": 93,
-    "content": "-- File: supabase/migrations/20261013000003_invitations_and_auth.sql\n-- Description: Member invitations table and server-side token activation engine\n\nCREATE TABLE IF NOT EXISTS public.member_invitations (\n    id UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),\n    member_id UUID NOT NULL REFERENCES public.members(id) ON DELETE CASCADE,\n    token_hash VARCHAR(64) NOT NULL UNIQUE,\n    invited_by UUID NOT NULL REFERENCES public.members(id),\n    expires_at TIMESTAMPTZ NOT NULL,\n    consumed_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())\n);\n\nCREATE INDEX IF NOT EXISTS idx_invitations_lookup ON public.member_invitations (token_hash, consumed_at, expires_at);\n\nCREATE OR REPLACE FUNCTION public.activate_invited_account(\n    p_token VARCHAR(64),\n    p_auth_user_id UUID\n)\nRETURNS JSONB\nLANGUAGE plpgsql\nSECURITY DEFINER\nSET search_path = pg_catalog, public, extensions\nAS $$\nDECLARE\n    v_token_hash VARCHAR(64);\n    v_invitation RECORD;\n    v_member RECORD;\n    v_auth_email TEXT;\nBEGIN\n    IF p_token IS NULL OR length(trim(p_token)) < 32 THEN\n        RAISE EXCEPTION 'Invalid token parameter.';\n    END IF;\n\n    IF p_auth_user_id IS NULL THEN\n        RAISE EXCEPTION 'Target Supabase Auth user ID cannot be null.';\n    END IF;\n\n    v_token_hash := encode(extensions.digest(p_token::bytea, 'sha256'), 'hex');\n\n    SELECT * INTO v_invitation \n    FROM public.member_invitations\n    WHERE token_hash = v_token_hash \n      AND consumed_at IS NULL \n      AND expires_at > timezone('utc', now())\n    FOR UPDATE;\n\n    IF NOT FOUND THEN\n        RAISE EXCEPTION 'Invalid, expired, or previously redeemed invitation token.';\n    END IF;\n\n    SELECT * INTO v_member \n    FROM public.members \n    WHERE id = v_invitation.member_id \n    FOR UPDATE;\n\n    IF v_member.status NOT IN ('PENDING_INVITATION', 'INVITED') THEN\n        RAISE EXCEPTION 'Member profile is not in an invitable state.';\n    END IF;\n\n    SELECT email INTO v_auth_email FROM auth.users WHERE id = p_auth_user_id;\n    IF v_auth_email IS NULL THEN\n        RAISE EXCEPTION 'Target Supabase Auth user does not exist.';\n    END IF;\n\n    IF LOWER(v_auth_email) != LOWER(v_member.email) THEN\n        RAISE EXCEPTION 'Authenticated email does not match invitation record.';\n    END IF;\n\n    UPDATE public.member_invitations\n    SET consumed_at = timezone('utc', now())\n    WHERE id = v_invitation.id;\n\n    UPDATE public.members\n    SET auth_user_id = p_auth_user_id,\n        status = 'ACTIVE',\n        updated_at = timezone('utc', now())\n    WHERE id = v_member.id;\n\n    RETURN jsonb_build_object(\n        'success', true,\n        'member_id', v_member.id,\n        'email', v_member.email,\n        'status', 'ACTIVE'\n    );\nEND;\n$$;\n\nREVOKE ALL ON FUNCTION public.activate_invited_account(VARCHAR, UUID) FROM PUBLIC;\nREVOKE ALL ON FUNCTION public.activate_invited_account(VARCHAR, UUID) FROM anon;\nREVOKE ALL ON FUNCTION public.activate_invited_account(VARCHAR, UUID) FROM authenticated;\nGRANT EXECUTE ON FUNCTION public.activate_invited_account(VARCHAR, UUID) TO service_role;\n"
+    "content": "-- File: supabase/migrations/20261013000003_invitations_and_auth.sql\n-- Description: Member invitations table and server-side token activation engine\n\nCREATE TABLE IF NOT EXISTS public.member_invitations (\n    id UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),\n    member_id UUID NOT NULL REFERENCES public.members(id) ON DELETE CASCADE,\n    token_hash VARCHAR(64) NOT NULL UNIQUE,\n    invited_by UUID NOT NULL REFERENCES public.members(id),\n    expires_at TIMESTAMPTZ NOT NULL,\n    consumed_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())\n);\n\nCREATE INDEX IF NOT EXISTS idx_invitations_lookup ON public.member_invitations (token_hash, consumed_at, expires_at);\n\nCREATE OR REPLACE FUNCTION public.activate_invited_account(\n    p_token VARCHAR(64),\n    p_auth_user_id UUID\n)\nRETURNS JSONB\nLANGUAGE plpgsql\nSECURITY DEFINER\nSET search_path = pg_catalog, public\nAS $$\nDECLARE\n    v_token_hash VARCHAR(64);\n    v_invitation RECORD;\n    v_member RECORD;\n    v_auth_email TEXT;\nBEGIN\n    IF p_token IS NULL OR length(trim(p_token)) < 32 THEN\n        RAISE EXCEPTION 'Invalid token parameter.';\n    END IF;\n\n    IF p_auth_user_id IS NULL THEN\n        RAISE EXCEPTION 'Target Supabase Auth user ID cannot be null.';\n    END IF;\n\n    v_token_hash := encode(extensions.digest(p_token::bytea, 'sha256'), 'hex');\n\n    SELECT * INTO v_invitation \n    FROM public.member_invitations\n    WHERE token_hash = v_token_hash \n      AND consumed_at IS NULL \n      AND expires_at > timezone('utc', now())\n    FOR UPDATE;\n\n    IF NOT FOUND THEN\n        RAISE EXCEPTION 'Invalid, expired, or previously redeemed invitation token.';\n    END IF;\n\n    SELECT * INTO v_member \n    FROM public.members \n    WHERE id = v_invitation.member_id \n    FOR UPDATE;\n\n    IF v_member.status NOT IN ('PENDING_INVITATION', 'INVITED') THEN\n        RAISE EXCEPTION 'Member profile is not in an invitable state.';\n    END IF;\n\n    SELECT email INTO v_auth_email FROM auth.users WHERE id = p_auth_user_id;\n    IF v_auth_email IS NULL THEN\n        RAISE EXCEPTION 'Target Supabase Auth user does not exist.';\n    END IF;\n\n    IF LOWER(v_auth_email) != LOWER(v_member.email) THEN\n        RAISE EXCEPTION 'Authenticated email does not match invitation record.';\n    END IF;\n\n    UPDATE public.member_invitations\n    SET consumed_at = timezone('utc', now())\n    WHERE id = v_invitation.id;\n\n    UPDATE public.members\n    SET auth_user_id = p_auth_user_id,\n        status = 'ACTIVE',\n        updated_at = timezone('utc', now())\n    WHERE id = v_member.id;\n\n    RETURN jsonb_build_object(\n        'success', true,\n        'member_id', v_member.id,\n        'email', v_member.email,\n        'status', 'ACTIVE'\n    );\nEND;\n$$;\n\nREVOKE ALL ON FUNCTION public.activate_invited_account(VARCHAR, UUID) FROM PUBLIC;\nREVOKE ALL ON FUNCTION public.activate_invited_account(VARCHAR, UUID) FROM anon;\nREVOKE ALL ON FUNCTION public.activate_invited_account(VARCHAR, UUID) FROM authenticated;\nGRANT EXECUTE ON FUNCTION public.activate_invited_account(VARCHAR, UUID) TO service_role;\n"
   },
   {
     "num": 4,

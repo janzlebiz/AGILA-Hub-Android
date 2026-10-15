@@ -25,7 +25,7 @@
     "id": "MIG-FILE-03",
     "name": "Migration File 20261013000003_invitations_and_auth.sql",
     "status": "PASS",
-    "evidence": "File exists with size 3074 bytes"
+    "evidence": "File exists with size 3062 bytes"
   },
   {
     "suite": "Migration Inventory",
@@ -492,23 +492,37 @@
   {
     "suite": "Procedural Body Validation",
     "id": "PROC-BLOCK-BALANCE",
-    "name": "Balanced Block & Control Flow Structures across All Functions & DO Blocks",
+    "name": "Offline Structural Block Balance Check (BEGIN/END, IF/END IF, LOOP/END LOOP)",
     "status": "PASS",
-    "evidence": "Verified 14 functions (13 PL/pgSQL, 1 SQL) and 9 DO blocks have matching BEGIN/END, IF/END IF, and LOOP/END LOOP constructs"
+    "evidence": "Verified 14 functions (13 PL/pgSQL, 1 SQL) and 9 DO blocks pass offline structural delimiter balance checks without dangling blocks; PL/pgSQL runtime compilation is NOT EXECUTED"
   },
   {
     "suite": "Procedural Body Validation",
     "id": "PROC-SECURITY-SEARCHPATH",
-    "name": "Explicit search_path Lockdown on all SECURITY DEFINER Functions",
+    "name": "Approved pg_catalog, public search_path Lockdown on all SECURITY DEFINER Functions",
     "status": "PASS",
-    "evidence": "Verified all 14 SECURITY DEFINER functions explicitly lock down search_path to eliminate search_path hijacking vulnerabilities"
+    "evidence": "Verified all 14 SECURITY DEFINER functions explicitly declare SET search_path strictly matching approved 'pg_catalog, public' configuration (zero missing, different, or unsafe values)"
   },
   {
     "suite": "Procedural Body Validation",
-    "id": "PROC-EMBEDDED-SQL",
-    "name": "Embedded Query Syntax AST Validation across Procedural Functions",
+    "id": "PROC-NEG-SEARCHPATH",
+    "name": "Negative Test: search_path Validator Rejects Missing, Different, or Unsafe Configurations",
     "status": "PASS",
-    "evidence": "Verified representative embedded queries inside functions and DO blocks parse cleanly into valid AST representations via libpg_query"
+    "evidence": "Verified validator strictly rejects missing search_path, single-schema public, user-controlled mutable \"$user\", and unapproved extensions additions"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-REPRESENTATIVE-SQL",
+    "name": "Representative Query Syntax AST Validation via libpg_query",
+    "status": "PASS",
+    "evidence": "Verified 6 representative SQL queries embedded within functions and DO blocks parse cleanly into valid AST representations via libpg_query (accurately scoped to representative query syntax validation)"
+  },
+  {
+    "suite": "Procedural Body Validation",
+    "id": "PROC-NEG-EMBEDDED-SQL",
+    "name": "Negative Test: Embedded Query Validator Rejects Malformed SQL Input",
+    "status": "PASS",
+    "evidence": "Verified libpg_query AST parser throws fatal PostgreSQL syntax errors when evaluating malformed SQL strings ('SELECT FROM WHERE', 'INSERT INTO;', 'CREATE TABLE (id);')"
   },
   {
     "suite": "Procedural Body Validation",

@@ -54,7 +54,7 @@ export default function App() {
 
   const tabs: TabItem[] = [
     { id: 'overview', label: 'Executive Overview', icon: Layers },
-    { id: 'tests', label: 'Automated Tests', icon: ListChecks, badge: '74 PASS' },
+    { id: 'tests', label: 'Automated Tests', icon: ListChecks, badge: '76 PASS' },
     { id: 'migrations', label: 'SQL Migrations (001-009)', icon: Database, badge: '9 Files' },
     { id: 'matrix', label: 'Verification Matrix', icon: FileCheck },
     { id: 'remediations', label: 'Remediations (REM-01..05)', icon: Shield },
@@ -123,7 +123,7 @@ export default function App() {
       specStatus: 'PASS',
       runtimeStatus: 'NOT EXECUTED',
       gate: 'CI/CD Gate',
-      notes: '74 automated assertions executed across 7 suites with 100% PASS'
+      notes: '76 automated assertions executed across 7 suites with 100% PASS'
     },
     {
       id: 'P1-SYNTAX-01',
@@ -141,7 +141,7 @@ export default function App() {
       specStatus: 'PASS',
       runtimeStatus: 'NOT EXECUTED',
       gate: 'Schema Gate',
-      notes: 'Balanced block & control structures, search_path lockdown on 14 SECURITY DEFINER functions, embedded queries validated'
+      notes: 'Structural block balance checks (runtime compilation NOT EXECUTED), approved pg_catalog, public search_path on 14 SECURITY DEFINER fns, representative embedded query AST validation, negative security/syntax rejection tests'
     },
     {
       id: 'REV-01-A',
@@ -359,7 +359,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              Gate 01: 74/74 PASS (100%)
+              Gate 01: 76/76 PASS (100%)
             </span>
             <span className="hidden md:inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/25">
               <Clock className="w-3.5 h-3.5 text-amber-400" />
@@ -422,7 +422,7 @@ export default function App() {
                     TFOE-PE Bantayog Elite Eagles Club — Phase 01 Foundation
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    All 9 SQL migrations, the machine-verifiable preflight check script, and the hardened transaction-safe restore runbook have been materialized on disk. 74 automated test assertions have executed across 7 suites with 100% PASS rate, covering top-level SQL AST DDL parsing and offline PL/pgSQL procedural body structural/security validation. Production infrastructure provisioning and live database operations remain strictly unexecuted to preserve deployment boundaries.
+                    All 9 SQL migrations, the machine-verifiable preflight check script, and the hardened transaction-safe restore runbook have been materialized on disk. 76 automated test assertions have executed across 7 suites with 100% PASS rate, covering top-level SQL AST DDL parsing, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures. Production infrastructure provisioning and live database operations remain strictly unexecuted to preserve deployment boundaries.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[260px]">
@@ -435,7 +435,7 @@ export default function App() {
                   <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-1">
                     <span className="text-slate-400">Schema Gate Verification:</span>
                     <p className="text-emerald-400 font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4" /> 74 / 74 ASSERTIONS PASSED (100%)
+                      <CheckCircle2 className="w-4 h-4" /> 76 / 76 ASSERTIONS PASSED (100%)
                     </p>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-1">
@@ -460,7 +460,7 @@ export default function App() {
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Automated Test Suite</div>
                 <p className="text-xs text-slate-300">
-                  Executed <code className="text-emerald-300">npm test</code> (74 assertions across 7 suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, top-level SQL AST syntax validation, and offline PL/pgSQL procedural body structural/security validation.
+                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 7 suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures.
                 </p>
               </div>
 
@@ -502,7 +502,7 @@ export default function App() {
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <span>Phase 01 Automated Test Suite</span>
                   <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
-                    74 / 74 PASSED (100%)
+                    76 / 76 PASSED (100%)
                   </span>
                 </h2>
                 <p className="text-xs text-slate-400">
