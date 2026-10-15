@@ -1091,115 +1091,224 @@ async function runPhase01Verification() {
       throw new Error('Cannot synchronize empty or non-array test results');
     }
 
-    // 1. Validate generated JSON before replacing existing files
-    const jsonOutput = JSON.stringify(testResults, null, 2);
-    validateGeneratedJson(jsonOutput, testResults.length);
-
-    // Staged write to temporary file, then filesystem rename (crash-safe staged replacement)
-    const tempJsonPath = `${jsonPath}.tmp`;
-    fs.writeFileSync(tempJsonPath, jsonOutput, 'utf-8');
-    if (!fs.existsSync(tempJsonPath) || fs.statSync(tempJsonPath).size === 0) {
-      throw new Error(`Failed to stage JSON results to temporary file: ${tempJsonPath}`);
+    // Phase 1: Pre-validation of both target paths, directories, and existing structures
+    // BEFORE staging or modifying either target file
+    const jsonDir = path.dirname(jsonPath);
+    if (!fs.existsSync(jsonDir)) {
+      throw new Error(`Synchronization failure: target directory for JSON not found: ${jsonDir}`);
     }
-    fs.renameSync(tempJsonPath, jsonPath);
 
-    // 2. Validate target dashboard file existence — DO NOT SILENTLY SKIP
     if (!fs.existsSync(phaseDataPath)) {
       throw new Error(`Synchronization failure: target dashboard file not found at ${phaseDataPath}`);
     }
 
-    // Read current dashboard file and check for target export pattern — DO NOT SILENTLY SKIP MALFORMED EXPORTS
     const currentPhaseData = fs.readFileSync(phaseDataPath, 'utf-8');
     const exportRegex = /export const phase01TestResults: TestCase\[\] = \[[\s\S]*?\n\];/;
     if (!exportRegex.test(currentPhaseData)) {
       throw new Error(`Synchronization failure: target file ${phaseDataPath} has missing or malformed "phase01TestResults" export declaration`);
     }
 
-    // Generate updated dashboard content
+    // Phase 2: Generation and strict validation of BOTH outputs before any replacement
+    const jsonOutput = JSON.stringify(testResults, null, 2);
+    validateGeneratedJson(jsonOutput, testResults.length);
+
     const updatedPhaseData = currentPhaseData.replace(
       exportRegex,
       `export const phase01TestResults: TestCase[] = ${jsonOutput};`
     );
-
-    // Validate generated output before replacing existing file
     validateGeneratedPhaseData(updatedPhaseData, testResults.length);
 
-    // Staged write to temporary file, then filesystem rename (crash-safe staged replacement)
-    const tempPhaseDataPath = `${phaseDataPath}.tmp`;
-    fs.writeFileSync(tempPhaseDataPath, updatedPhaseData, 'utf-8');
-    if (!fs.existsSync(tempPhaseDataPath) || fs.statSync(tempPhaseDataPath).size === 0) {
-      throw new Error(`Failed to stage dashboard data to temporary file: ${tempPhaseDataPath}`);
+    // Phase 3: Stage BOTH outputs completely into temporary files before replacement
+    const uniqueNonce = `${process.pid}.${Date.now()}.${Math.random().toString(36).substring(2, 8)}`;
+    const stageJsonPath = `${jsonPath}.stage.${uniqueNonce}`;
+    const stagePhaseDataPath = `${phaseDataPath}.stage.${uniqueNonce}`;
+    const backupJsonPath = `${jsonPath}.bak.${uniqueNonce}`;
+
+    try {
+      fs.writeFileSync(stageJsonPath, jsonOutput, 'utf-8');
+      if (!fs.existsSync(stageJsonPath) || fs.statSync(stageJsonPath).size === 0) {
+        throw new Error(`Failed to stage JSON results to temporary file: ${stageJsonPath}`);
+      }
+
+      fs.writeFileSync(stagePhaseDataPath, updatedPhaseData, 'utf-8');
+      if (!fs.existsSync(stagePhaseDataPath) || fs.statSync(stagePhaseDataPath).size === 0) {
+        throw new Error(`Failed to stage dashboard data to temporary file: ${stagePhaseDataPath}`);
+      }
+
+      // Phase 4: Staged replacement with recovery/rollback handling between file renames
+      // Note: Two distinct filesystem renames are not transactionally atomic.
+      // Staged preparation and rollback recovery guard against intermediate corruption.
+      let jsonReplaced = false;
+
+      // Backup existing JSON file if present to enable rollback if dashboard rename fails
+      if (fs.existsSync(jsonPath)) {
+        fs.copyFileSync(jsonPath, backupJsonPath);
+      }
+
+      try {
+        // Replace File 1: JSON results
+        fs.renameSync(stageJsonPath, jsonPath);
+        jsonReplaced = true;
+
+        // Replace File 2: Dashboard TypeScript dataset
+        fs.renameSync(stagePhaseDataPath, phaseDataPath);
+
+        // Clean up backup upon successful replacement of both files
+        if (fs.existsSync(backupJsonPath)) {
+          fs.unlinkSync(backupJsonPath);
+        }
+      } catch (renameErr: any) {
+        // Rollback recovery: If JSON was replaced but dashboard replacement failed, restore JSON
+        if (jsonReplaced && fs.existsSync(backupJsonPath)) {
+          try {
+            fs.copyFileSync(backupJsonPath, jsonPath);
+            fs.unlinkSync(backupJsonPath);
+          } catch (rollbackErr: any) {
+            console.error(`CRITICAL: Rollback failed for ${jsonPath}:`, rollbackErr);
+          }
+        }
+        throw renameErr;
+      }
+    } finally {
+      // Clean up staging files if still present
+      if (fs.existsSync(stageJsonPath)) {
+        try { fs.unlinkSync(stageJsonPath); } catch {}
+      }
+      if (fs.existsSync(stagePhaseDataPath)) {
+        try { fs.unlinkSync(stagePhaseDataPath); } catch {}
+      }
+      if (fs.existsSync(backupJsonPath)) {
+        try { fs.unlinkSync(backupJsonPath); } catch {}
+      }
     }
-    fs.renameSync(tempPhaseDataPath, phaseDataPath);
 
     return { jsonPath, phaseDataPath };
   }
 
-  // Pre-synchronization Negative Fixtures: Prove validator strictly rejects missing/malformed exports
+  // Pre-synchronization Negative Fixtures: Prove validator strictly rejects missing/malformed targets
+  // and operates exclusively on isolated temporary files without modifying canonical files
   function runSynchronizationNegativeFixtures(): void {
+    const canonicalJsonPath = path.resolve('scripts/phase01_test_results.json');
+    const canonicalDashboardPath = path.resolve('src/data/phase01Data.ts');
+
+    // Snapshot exact byte contents of canonical files before negative fixture execution
+    const canonicalJsonBefore = fs.existsSync(canonicalJsonPath) ? fs.readFileSync(canonicalJsonPath) : null;
+    const canonicalDashboardBefore = fs.existsSync(canonicalDashboardPath) ? fs.readFileSync(canonicalDashboardPath) : null;
+
+    // Create an isolated temporary directory for negative fixtures
+    const isolatedDir = fs.mkdtempSync(path.join(path.resolve('scripts'), '.sync_isolate_fixture_'));
+    const isolatedJsonPath = path.join(isolatedDir, 'fixture_results.json');
+    const isolatedDashboardPath = path.join(isolatedDir, 'fixture_phase01Data.ts');
+    const nonExistentDashboardPath = path.join(isolatedDir, 'nonexistent_phase01Data.ts');
+    const malformedDashboardPath = path.join(isolatedDir, 'malformed_phase01Data.ts');
+
+    const validInitialDashboard =
+      'export interface TestCase {\n  suite: string;\n  id: string;\n  name: string;\n  status: \'PASS\' | \'FAIL\';\n  evidence: string;\n}\n' +
+      'export interface MigrationItem {\n  num: number;\n}\n' +
+      'export const phase01TestResults: TestCase[] = [\n' +
+      '  {\n    "suite": "Test",\n    "id": "MIG-INV-01",\n    "name": "T",\n    "status": "PASS",\n    "evidence": "E"\n  },\n' +
+      '  {\n    "suite": "Test",\n    "id": "PROC-PREFLIGHT-DO-BLOCK",\n    "name": "T2",\n    "status": "PASS",\n    "evidence": "E2"\n  }\n' +
+      '];\n';
+
     const fixtureResults: TestResult[] = [
-      { suite: 'Sample Suite', id: 'SMP-01', name: 'Sample Test', status: 'PASS', evidence: 'Sample Evidence' }
+      { suite: 'Test', id: 'MIG-INV-01', name: 'T', status: 'PASS', evidence: 'E' },
+      { suite: 'Test', id: 'PROC-PREFLIGHT-DO-BLOCK', name: 'T2', status: 'PASS', evidence: 'E2' }
     ];
 
-    // Negative Fixture 1: Target file does not exist -> must fail with descriptive error
-    let missingFileRejected = false;
     try {
-      synchronizeResults(fixtureResults, {
-        phaseDataPath: path.resolve('src/data/.nonexistent_fixture_phase01Data.ts')
-      });
-    } catch (err: any) {
-      if (err.message && err.message.includes('target dashboard file not found')) {
-        missingFileRejected = true;
-      }
-    }
+      fs.writeFileSync(isolatedDashboardPath, validInitialDashboard, 'utf-8');
+      fs.writeFileSync(isolatedJsonPath, JSON.stringify(fixtureResults, null, 2), 'utf-8');
+      fs.writeFileSync(malformedDashboardPath, '// Malformed test file\nexport const otherExport = [];\n', 'utf-8');
 
-    if (!missingFileRejected) {
-      throw new Error('Synchronization hardening failed: negative fixture for missing target dashboard file was NOT rejected');
-    }
+      const isolatedJsonInitialBytes = fs.readFileSync(isolatedJsonPath);
 
-    // Negative Fixture 2: Target file has missing or malformed phase01TestResults export -> must fail
-    let malformedExportRejected = false;
-    const tempMalformedPath = path.resolve('src/data/.test_malformed_phase01Data.ts');
-    try {
-      fs.writeFileSync(tempMalformedPath, '// Malformed test file\nexport const otherExport = [];\n', 'utf-8');
-      synchronizeResults(fixtureResults, {
-        phaseDataPath: tempMalformedPath
-      });
-    } catch (err: any) {
-      if (err.message && err.message.includes('missing or malformed "phase01TestResults" export declaration')) {
-        malformedExportRejected = true;
+      // Negative Fixture 1: Target dashboard file does not exist -> must fail with descriptive error
+      // Must not modify isolatedJsonPath
+      let missingFileRejected = false;
+      try {
+        synchronizeResults(fixtureResults, {
+          jsonPath: isolatedJsonPath,
+          phaseDataPath: nonExistentDashboardPath
+        });
+      } catch (err: any) {
+        if (err.message && err.message.includes('target dashboard file not found')) {
+          missingFileRejected = true;
+        }
       }
+
+      if (!missingFileRejected) {
+        throw new Error('Synchronization hardening failed: negative fixture for missing target dashboard file was NOT rejected');
+      }
+
+      // Verify isolatedJsonPath was NOT modified
+      if (!fs.readFileSync(isolatedJsonPath).equals(isolatedJsonInitialBytes)) {
+        throw new Error('Synchronization isolation failed: isolated JSON file was modified when target dashboard was missing');
+      }
+
+      // Negative Fixture 2: Target dashboard file has missing or malformed phase01TestResults export -> must fail
+      // Must not modify isolatedJsonPath or malformedDashboardPath
+      let malformedExportRejected = false;
+      try {
+        synchronizeResults(fixtureResults, {
+          jsonPath: isolatedJsonPath,
+          phaseDataPath: malformedDashboardPath
+        });
+      } catch (err: any) {
+        if (err.message && err.message.includes('missing or malformed "phase01TestResults" export declaration')) {
+          malformedExportRejected = true;
+        }
+      }
+
+      if (!malformedExportRejected) {
+        throw new Error('Synchronization hardening failed: negative fixture for malformed target dashboard export was NOT rejected');
+      }
+
+      // Verify isolatedJsonPath was NOT modified
+      if (!fs.readFileSync(isolatedJsonPath).equals(isolatedJsonInitialBytes)) {
+        throw new Error('Synchronization isolation failed: isolated JSON file was modified when target dashboard was malformed');
+      }
+
+      // Negative Fixture 3: Generated output validation rejects invalid/incomplete phase data
+      let invalidOutputRejected = false;
+      try {
+        validateGeneratedPhaseData('export const broken = true;', 76);
+      } catch (err: any) {
+        if (err.message && err.message.includes('missing required "export const phase01TestResults')) {
+          invalidOutputRejected = true;
+        }
+      }
+
+      if (!invalidOutputRejected) {
+        throw new Error('Synchronization hardening failed: negative fixture for invalid generated dashboard output was NOT rejected');
+      }
+
+      // Negative Fixture 4: Canonical Byte-for-Byte Invariance Verification
+      // Prove that missing/malformed targets in negative fixtures leave both canonical files byte-for-byte unchanged
+      if (canonicalJsonBefore) {
+        const canonicalJsonAfter = fs.readFileSync(canonicalJsonPath);
+        if (!canonicalJsonBefore.equals(canonicalJsonAfter)) {
+          throw new Error('Synchronization isolation violation: canonical scripts/phase01_test_results.json was modified during negative fixtures!');
+        }
+      }
+      if (canonicalDashboardBefore) {
+        const canonicalDashboardAfter = fs.readFileSync(canonicalDashboardPath);
+        if (!canonicalDashboardBefore.equals(canonicalDashboardAfter)) {
+          throw new Error('Synchronization isolation violation: canonical src/data/phase01Data.ts was modified during negative fixtures!');
+        }
+      }
+
+      console.log('[PASS] [Synchronization Guard] Negative Fixtures: Confirmed rejection of missing targets, malformed exports, and invalid outputs on isolated files with canonical byte-for-byte invariance.');
     } finally {
-      if (fs.existsSync(tempMalformedPath)) {
-        fs.unlinkSync(tempMalformedPath);
+      if (fs.existsSync(isolatedDir)) {
+        try { fs.rmSync(isolatedDir, { recursive: true, force: true }); } catch {}
       }
     }
-
-    if (!malformedExportRejected) {
-      throw new Error('Synchronization hardening failed: negative fixture for malformed target dashboard export was NOT rejected');
-    }
-
-    // Negative Fixture 3: Generated output validation rejects invalid/incomplete phase data
-    let invalidOutputRejected = false;
-    try {
-      validateGeneratedPhaseData('export const broken = true;', 76);
-    } catch (err: any) {
-      if (err.message && err.message.includes('missing required "export const phase01TestResults')) {
-        invalidOutputRejected = true;
-      }
-    }
-
-    if (!invalidOutputRejected) {
-      throw new Error('Synchronization hardening failed: negative fixture for invalid generated dashboard output was NOT rejected');
-    }
-
-    console.log('[PASS] [Synchronization Guard] Negative Fixtures: Successfully verified rejection of missing target file, malformed dashboard export, and invalid generated output.');
   }
 
-  // Execute synchronization negative failure fixtures first
+  // Execute synchronization negative failure fixtures first on isolated temporary files
   runSynchronizationNegativeFixtures();
 
-  // Perform validated, staged synchronization
+  // Perform validated, staged synchronization on canonical files
   synchronizeResults(results);
   console.log('[PASS] [Synchronization] Canonically synchronized scripts/phase01_test_results.json and src/data/phase01Data.ts');
 
