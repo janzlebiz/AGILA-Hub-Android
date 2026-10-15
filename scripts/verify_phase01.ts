@@ -1085,12 +1085,21 @@ async function runPhase01Verification() {
     phaseDataPath?: string;
     _faultInjectDashboardRename?: boolean;
     _faultInjectRollback?: boolean;
+    _faultInjectBackupCleanup?: boolean;
+    throwOnBackupCleanupFailure?: boolean;
+  }
+
+  interface SynchronizeResult {
+    jsonPath: string;
+    phaseDataPath: string;
+    backupCleanupWarning?: string;
+    retainedBackupPath?: string;
   }
 
   function synchronizeResults(
     testResults: TestResult[],
     options?: SynchronizeOptions
-  ): { jsonPath: string; phaseDataPath: string } {
+  ): SynchronizeResult {
     const jsonPath = options?.jsonPath || path.resolve('scripts/phase01_test_results.json');
     const phaseDataPath = options?.phaseDataPath || path.resolve('src/data/phase01Data.ts');
 
@@ -1134,6 +1143,7 @@ async function runPhase01Verification() {
     const jsonExistedInitially = fs.existsSync(jsonPath);
     let backupCreated = false;
     let jsonReplaced = false;
+    let dashboardReplaced = false;
     let backupPreservedForManualRecovery = false;
 
     try {
@@ -1157,6 +1167,7 @@ async function runPhase01Verification() {
         backupCreated = true;
       }
 
+      // Step 4a: File replacement operations
       try {
         // Replace File 1: JSON results
         fs.renameSync(stageJsonPath, jsonPath);
@@ -1167,15 +1178,12 @@ async function runPhase01Verification() {
           throw new Error('Injected fault: Dashboard rename failed');
         }
         fs.renameSync(stagePhaseDataPath, phaseDataPath);
-
-        // Clean up backup upon successful replacement of both files
-        if (backupCreated && fs.existsSync(backupJsonPath)) {
-          fs.unlinkSync(backupJsonPath);
-        }
+        dashboardReplaced = true;
       } catch (renameErr: any) {
-        // Rollback recovery: If JSON was replaced but dashboard replacement failed,
+        // Rollback recovery: ONLY IF RENAME FAILED before both files were replaced.
+        // If JSON was replaced but dashboard replacement failed,
         // restore original JSON (if pre-existing) or remove newly created JSON (if initially absent).
-        if (jsonReplaced) {
+        if (jsonReplaced && !dashboardReplaced) {
           if (jsonExistedInitially && backupCreated && fs.existsSync(backupJsonPath)) {
             try {
               if (options?._faultInjectRollback) {
@@ -1212,6 +1220,38 @@ async function runPhase01Verification() {
         }
         throw renameErr;
       }
+
+      // Step 4b: Post-Replacement Backup Cleanup (STRICTLY SEPARATED from file replacement)
+      // Both replacements have succeeded (jsonReplaced && dashboardReplaced).
+      // A backup deletion failure after both replacements succeed must NEVER trigger rollback
+      // of only the JSON file, which would cause a JSON/dashboard parity mismatch.
+      let backupCleanupWarning: string | undefined;
+      let retainedBackupPath: string | undefined;
+
+      if (backupCreated && fs.existsSync(backupJsonPath)) {
+        try {
+          if (options?._faultInjectBackupCleanup) {
+            throw new Error('Injected fault: Post-replacement backup deletion failed');
+          }
+          fs.unlinkSync(backupJsonPath);
+        } catch (cleanupErr: any) {
+          // Retain the backup on disk, report exact path, and flag warning/error without altering either file
+          backupPreservedForManualRecovery = true;
+          retainedBackupPath = backupJsonPath;
+          backupCleanupWarning =
+            `POST-REPLACEMENT BACKUP CLEANUP ISSUE: Both canonical files were successfully synchronized with 100% mutual parity, ` +
+            `but post-replacement deletion of backup failed. The backup file is retained at: ${backupJsonPath}. Cause: ${cleanupErr.message}`;
+          console.warn(`\n${backupCleanupWarning}`);
+
+          if (options?.throwOnBackupCleanupFailure) {
+            const err = new Error(backupCleanupWarning);
+            (err as any).retainedBackupPath = backupJsonPath;
+            throw err;
+          }
+        }
+      }
+
+      return { jsonPath, phaseDataPath, backupCleanupWarning, retainedBackupPath };
     } finally {
       // Clean up staging files if still present
       if (fs.existsSync(stageJsonPath)) {
@@ -1225,8 +1265,6 @@ async function runPhase01Verification() {
         try { fs.unlinkSync(backupJsonPath); } catch {}
       }
     }
-
-    return { jsonPath, phaseDataPath };
   }
 
   // Pre-synchronization Negative Fixtures & Fault-Injection Tests:
@@ -1412,7 +1450,81 @@ async function runPhase01Verification() {
       // Clean up the preserved test backup
       try { fs.unlinkSync(reportedBackupPath); } catch {}
 
-      // Negative Fixture 7: Canonical Byte-for-Byte Invariance Verification
+      // Negative Fixture 7: Fault-Injection — Post-Replacement Backup Deletion Failure
+      // Verifies:
+      // a) Backup deletion failure after both replacements succeed NEVER triggers rollback of JSON file
+      // b) Both targets remain updated and in 100% mutual parity
+      // c) The backup is retained on disk and its exact path reported
+      const updatedResults: TestResult[] = [
+        { suite: 'Test', id: 'MIG-INV-01', name: 'Updated T', status: 'PASS', evidence: 'Updated Evidence 1' },
+        { suite: 'Test', id: 'PROC-PREFLIGHT-DO-BLOCK', name: 'Updated T2', status: 'PASS', evidence: 'Updated Evidence 2' }
+      ];
+
+      const cleanupFaultRes = synchronizeResults(updatedResults, {
+        jsonPath: isolatedJsonPath,
+        phaseDataPath: isolatedDashboardPath,
+        _faultInjectBackupCleanup: true
+      });
+
+      if (!cleanupFaultRes.backupCleanupWarning || !cleanupFaultRes.retainedBackupPath) {
+        throw new Error('Fault injection failed: backup cleanup warning and retained backup path were not returned');
+      }
+
+      if (!fs.existsSync(cleanupFaultRes.retainedBackupPath)) {
+        throw new Error(`Post-replacement cleanup guard failed: retained backup was deleted at "${cleanupFaultRes.retainedBackupPath}"`);
+      }
+
+      // Verify retained backup is byte-for-byte identical to the original pre-replacement JSON
+      if (!fs.readFileSync(cleanupFaultRes.retainedBackupPath).equals(isolatedJsonInitialBytes)) {
+        throw new Error('Post-replacement cleanup guard failed: retained backup does not match pre-replacement JSON');
+      }
+
+      // Verify BOTH files were successfully updated and NOT rolled back
+      const updatedJsonBytes = fs.readFileSync(isolatedJsonPath, 'utf-8');
+      const updatedDashboardContent = fs.readFileSync(isolatedDashboardPath, 'utf-8');
+
+      if (updatedJsonBytes === isolatedJsonInitialBytes.toString('utf-8')) {
+        throw new Error('Parity violation: JSON was incorrectly rolled back after both files were replaced!');
+      }
+
+      const parsedUpdatedJson = JSON.parse(updatedJsonBytes);
+      if (parsedUpdatedJson.length !== 2 || parsedUpdatedJson[0].name !== 'Updated T') {
+        throw new Error('Post-replacement JSON content mismatch');
+      }
+
+      if (!updatedDashboardContent.includes('Updated T') || !updatedDashboardContent.includes('Updated Evidence 1')) {
+        throw new Error('Post-replacement Dashboard content mismatch');
+      }
+
+      // Clean up the retained test backup
+      try { fs.unlinkSync(cleanupFaultRes.retainedBackupPath); } catch {}
+
+      // Also verify fault injection with throwOnBackupCleanupFailure
+      let throwOnCleanupTriggered = false;
+      try {
+        // Reset isolatedDashboardPath to valid template before running throw test
+        fs.writeFileSync(isolatedDashboardPath, validInitialDashboard, 'utf-8');
+        fs.writeFileSync(isolatedJsonPath, JSON.stringify(fixtureResults, null, 2), 'utf-8');
+        synchronizeResults(updatedResults, {
+          jsonPath: isolatedJsonPath,
+          phaseDataPath: isolatedDashboardPath,
+          _faultInjectBackupCleanup: true,
+          throwOnBackupCleanupFailure: true
+        });
+      } catch (err: any) {
+        if (err.message && err.message.includes('POST-REPLACEMENT BACKUP CLEANUP ISSUE')) {
+          throwOnCleanupTriggered = true;
+          if (err.retainedBackupPath && fs.existsSync(err.retainedBackupPath)) {
+            try { fs.unlinkSync(err.retainedBackupPath); } catch {}
+          }
+        }
+      }
+
+      if (!throwOnCleanupTriggered) {
+        throw new Error('Fault injection failed: throwOnBackupCleanupFailure did not throw expected error');
+      }
+
+      // Negative Fixture 8: Canonical Byte-for-Byte Invariance Verification & Zero Temp File Leakage
       // Prove that missing/malformed targets and fault injections leave both canonical files byte-for-byte unchanged
       if (canonicalJsonBefore) {
         const canonicalJsonAfter = fs.readFileSync(canonicalJsonPath);
@@ -1427,7 +1539,15 @@ async function runPhase01Verification() {
         }
       }
 
-      console.log('[PASS] [Synchronization Guard] Negative Fixtures & Fault Injections: Confirmed rejection of missing/malformed targets, byte-for-byte rollback on rename failures, backup preservation on rollback failures, and canonical byte invariance.');
+      // Verify no unintended temporary files leaked into scripts/ or src/data/
+      const strayFiles = fs.readdirSync(path.resolve('scripts')).filter(f =>
+        f.includes('.stage.') || f.includes('.bak.') || (f.startsWith('.sync_isolate_fixture_') && f !== path.basename(isolatedDir))
+      );
+      if (strayFiles.length > 0) {
+        throw new Error(`Unintended temporary files remained after negative fixtures in scripts/: ${strayFiles.join(', ')}`);
+      }
+
+      console.log('[PASS] [Synchronization Guard] Negative Fixtures & Fault Injections: Confirmed rejection of missing/malformed targets, byte-for-byte rollback on rename failures, backup preservation on rollback failures, post-replacement cleanup isolation without parity mismatch, and canonical byte invariance.');
     } finally {
       if (fs.existsSync(isolatedDir)) {
         try { fs.rmSync(isolatedDir, { recursive: true, force: true }); } catch {}
