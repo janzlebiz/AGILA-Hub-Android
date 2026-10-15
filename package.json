@@ -9,7 +9,12 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/verify_phase01.ts && tsx scripts/validate_parity.ts"
+    "test:verify": "tsx scripts/verify_phase01.ts",
+    "test:parity": "tsx scripts/validate_parity.ts",
+    "test:schema": "tsx scripts/validate_schema_parity.ts",
+    "test:docs": "tsx scripts/validate_doc_parity.ts",
+    "test": "tsx scripts/verify_phase01.ts && tsx scripts/validate_parity.ts && tsx scripts/validate_schema_parity.ts && tsx scripts/validate_doc_parity.ts",
+    "release-check": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
