@@ -460,7 +460,7 @@ export default function App() {
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Automated Test Suite</div>
                 <p className="text-xs text-slate-300">
-                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 8 test suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, static RLS policy contracts (names, roles, commands, USING/WITH CHECK) with 5 negative fixtures across 11 core tables, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, negative security/malformed SQL fixtures, and automated dataset parity validation via validate_parity.ts.
+                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 8 test suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, static RLS policy contracts (names, roles with exact role-set equality, commands, USING/WITH CHECK) with 6 negative fixtures across 11 core tables, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, negative security/malformed SQL fixtures, and automated dataset parity validation via validate_parity.ts.
                 </p>
               </div>
 

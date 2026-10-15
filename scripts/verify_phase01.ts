@@ -431,7 +431,7 @@ async function runPhase01Verification() {
       const cmdMatch = body.match(/FOR\s+(SELECT|INSERT|UPDATE|DELETE|ALL)/i);
       const cmd = cmdMatch ? cmdMatch[1].toUpperCase() : null;
       const toMatch = body.match(/TO\s+([a-zA-Z0-9_,\s]+?)(?=\s+USING|\s+WITH\s+CHECK|;|$)/i);
-      const roles = toMatch ? toMatch[1].split(',').map(r => r.trim()) : [];
+      const roles = toMatch ? toMatch[1].split(',').map(r => r.trim().toLowerCase()).filter(Boolean) : [];
       const usingExpr = extractParenthesizedClause(body, 'USING');
       const withCheckExpr = extractParenthesizedClause(body, 'WITH CHECK');
       parsed.push({ name, cmd, roles, usingExpr, withCheckExpr });
@@ -445,9 +445,22 @@ async function runPhase01Verification() {
       if (found.cmd !== exp.command) {
         return { valid: false, error: `Policy "${exp.name}" command mismatch: expected ${exp.command}, got ${found.cmd}`, policiesFound: parsed.map(p => p.name) };
       }
-      if (!exp.roles.every(r => found.roles.includes(r))) {
-        return { valid: false, error: `Policy "${exp.name}" roles mismatch: expected ${exp.roles.join(',')}, got ${found.roles.join(',')}`, policiesFound: parsed.map(p => p.name) };
+
+      // Exact role-set equality: normalize role names and ordering before comparison
+      const normExpectedRoles = Array.from(new Set(exp.roles.map(r => r.trim().toLowerCase()).filter(Boolean))).sort();
+      const normFoundRoles = Array.from(new Set(found.roles.map(r => r.trim().toLowerCase()).filter(Boolean))).sort();
+      const rolesMatch =
+        normExpectedRoles.length === normFoundRoles.length &&
+        normExpectedRoles.every((r, idx) => r === normFoundRoles[idx]);
+
+      if (!rolesMatch) {
+        return {
+          valid: false,
+          error: `Policy "${exp.name}" roles mismatch: expected [${normExpectedRoles.join(', ')}], got [${normFoundRoles.join(', ')}]`,
+          policiesFound: parsed.map(p => p.name)
+        };
       }
+
       if (exp.usingPattern && (!found.usingExpr || !exp.usingPattern.test(found.usingExpr))) {
         return { valid: false, error: `Policy "${exp.name}" USING clause does not satisfy required pattern`, policiesFound: parsed.map(p => p.name) };
       }
@@ -459,7 +472,7 @@ async function runPhase01Verification() {
     return { valid: true, policiesFound: parsed.map(p => p.name) };
   }
 
-  // Pre-test 5 negative fixtures for the RLS policy validator
+  // Pre-test 6 negative fixtures for the RLS policy validator
   let rlsNegativeFixturesPassed = true;
   const validMembersReadPolicy = `
     CREATE POLICY "members_read_policy" ON public.members
@@ -487,12 +500,16 @@ async function runPhase01Verification() {
   // Fixture 5: Missing WITH CHECK clause on UPDATE policy
   const rlsNeg5 = validateTableRlsPolicies('members', validMembersReadPolicy + 'CREATE POLICY "members_self_update_policy" ON public.members FOR UPDATE TO authenticated USING (public.is_active_member() AND auth_user_id = auth.uid());', rlsContracts.members);
 
+  // Fixture 6: Unexpected/additional role (assigned to 'authenticated, anon' when only 'authenticated' expected)
+  const rlsNeg6 = validateTableRlsPolicies('member_invitations', 'CREATE POLICY "invitations_admin_select" ON public.member_invitations FOR SELECT TO authenticated, anon USING (public.is_active_member() AND (public.get_caller_auth()).user_role IN (\'admin\', \'super_admin\'));', rlsContracts.member_invitations);
+
   if (
     rlsNeg1.valid || !rlsNeg1.error?.includes('Missing expected policy') ||
     rlsNeg2.valid || !rlsNeg2.error?.includes('roles mismatch') ||
     rlsNeg3.valid || !rlsNeg3.error?.includes('command mismatch') ||
     rlsNeg4.valid || !rlsNeg4.error?.includes('USING clause') ||
-    rlsNeg5.valid || !rlsNeg5.error?.includes('WITH CHECK clause')
+    rlsNeg5.valid || !rlsNeg5.error?.includes('WITH CHECK clause') ||
+    rlsNeg6.valid || !rlsNeg6.error?.includes('roles mismatch')
   ) {
     rlsNegativeFixturesPassed = false;
   }
@@ -511,7 +528,7 @@ async function runPhase01Verification() {
       'RLS Policies',
       `RLS-${table.toUpperCase()}`,
       `RLS Enabled on public.${table}`,
-      `Verified ENABLE ROW LEVEL SECURITY and validated ${expected.length} static migration policy definition(s): ${policySummary}; 5 negative fixtures verified rejecting missing/malformed policies (static contract check, not runtime authorization)`
+      `Verified ENABLE ROW LEVEL SECURITY and validated ${expected.length} static migration policy definition(s): ${policySummary}; 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)`
     );
   });
 
