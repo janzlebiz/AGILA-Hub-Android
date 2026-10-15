@@ -118,12 +118,12 @@ export default function App() {
     },
     {
       id: 'P1-TEST-01',
-      requirement: 'Phase 01 Automated Test Suite',
-      target: 'scripts/verify_phase01.ts (npm test)',
+      requirement: 'Phase 01 Automated Test Suite & Parity Validation',
+      target: 'scripts/verify_phase01.ts & scripts/validate_parity.ts (npm test)',
       specStatus: 'PASS',
       runtimeStatus: 'NOT EXECUTED',
       gate: 'CI/CD Gate',
-      notes: '76 automated assertions executed across 8 test suites with 100% PASS'
+      notes: '76 automated assertions across 8 test suites (100% PASS); automated parity enforced via validate_parity.ts'
     },
     {
       id: 'P1-SYNTAX-01',
@@ -460,7 +460,7 @@ export default function App() {
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Automated Test Suite</div>
                 <p className="text-xs text-slate-300">
-                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 8 test suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures.
+                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 8 test suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, static RLS policy contracts (names, roles, commands, USING/WITH CHECK) with 5 negative fixtures across 11 core tables, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, negative security/malformed SQL fixtures, and automated dataset parity validation via validate_parity.ts.
                 </p>
               </div>
 

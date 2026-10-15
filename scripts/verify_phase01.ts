@@ -207,16 +207,311 @@ async function runPhase01Verification() {
   );
 
   // ---------------------------------------------------------
-  // SUITE 4: RLS Policy Coverage on Core Tables
+  // SUITE 4: RLS Policy Coverage on Core Tables (Static Policy Verification & Negative Fixtures)
   // ---------------------------------------------------------
+  interface ExpectedRlsPolicy {
+    name: string;
+    command: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'ALL';
+    roles: string[];
+    usingPattern?: RegExp;
+    withCheckPattern?: RegExp;
+  }
+
+  const rlsContracts: Record<string, ExpectedRlsPolicy[]> = {
+    members: [
+      {
+        name: 'members_read_policy',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?auth_user_id\s*=\s*auth\.uid\(\)[\s\S]*?'admin',\s*'super_admin'/
+      },
+      {
+        name: 'members_self_update_policy',
+        command: 'UPDATE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?auth_user_id\s*=\s*auth\.uid\(\)/,
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?auth_user_id\s*=\s*auth\.uid\(\)/
+      }
+    ],
+    member_invitations: [
+      {
+        name: 'invitations_admin_select',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'admin',\s*'super_admin'/
+      }
+    ],
+    eagles_id_cards: [
+      {
+        name: 'eagles_id_select',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?member_id[\s\S]*?'admin',\s*'super_admin'/
+      },
+      {
+        name: 'eagles_id_insert',
+        command: 'INSERT',
+        roles: ['authenticated'],
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?member_id/
+      },
+      {
+        name: 'eagles_id_update',
+        command: 'UPDATE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?member_id[\s\S]*?'admin',\s*'super_admin'/,
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?member_id[\s\S]*?'admin',\s*'super_admin'/
+      },
+      {
+        name: 'eagles_id_delete',
+        command: 'DELETE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'admin',\s*'super_admin'/
+      }
+    ],
+    announcements: [
+      {
+        name: 'announcements_read_active',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)/
+      },
+      {
+        name: 'announcements_write_officers',
+        command: 'INSERT',
+        roles: ['authenticated'],
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?'officer'[\s\S]*?'admin'/
+      },
+      {
+        name: 'announcements_update_authors',
+        command: 'UPDATE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?author_id[\s\S]*?'admin',\s*'super_admin'/
+      },
+      {
+        name: 'announcements_delete_authors',
+        command: 'DELETE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?author_id[\s\S]*?'admin',\s*'super_admin'/
+      }
+    ],
+    attendance_events: [
+      {
+        name: 'events_read_active',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)/
+      },
+      {
+        name: 'events_write_officers',
+        command: 'ALL',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'officer'[\s\S]*?'admin'/,
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?'officer'[\s\S]*?'admin'/
+      }
+    ],
+    attendance_records: [
+      {
+        name: 'attendance_read',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?member_id[\s\S]*?'officer'[\s\S]*?'admin'/
+      },
+      {
+        name: 'attendance_write_officers',
+        command: 'ALL',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'officer'[\s\S]*?'admin'/,
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?'officer'[\s\S]*?'admin'/
+      }
+    ],
+    contributions: [
+      {
+        name: 'contributions_read',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?member_id[\s\S]*?'financial_officer'[\s\S]*?'admin'/
+      },
+      {
+        name: 'contributions_write_finance',
+        command: 'INSERT',
+        roles: ['authenticated'],
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/
+      },
+      {
+        name: 'contributions_update_finance',
+        command: 'UPDATE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/,
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/
+      }
+    ],
+    expenses: [
+      {
+        name: 'expenses_read_finance',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/
+      },
+      {
+        name: 'expenses_write_finance',
+        command: 'INSERT',
+        roles: ['authenticated'],
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/
+      },
+      {
+        name: 'expenses_update_finance',
+        command: 'UPDATE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/,
+        withCheckPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/
+      },
+      {
+        name: 'expenses_delete_finance',
+        command: 'DELETE',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'financial_officer'[\s\S]*?'admin'/
+      }
+    ],
+    constitution_versions: [
+      {
+        name: 'constitution_read_active',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)/
+      }
+    ],
+    constitution_sections: [
+      {
+        name: 'sections_read_active',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)/
+      }
+    ],
+    audit_logs: [
+      {
+        name: 'audit_logs_read_admins',
+        command: 'SELECT',
+        roles: ['authenticated'],
+        usingPattern: /public\.is_active_member\(\)[\s\S]*?'admin',\s*'super_admin'/
+      }
+    ]
+  };
+
+  function extractParenthesizedClause(body: string, keyword: 'USING' | 'WITH CHECK'): string | null {
+    const kwRegex = new RegExp(`\\b${keyword.replace(' ', '\\s+')}\\s*\\(`, 'i');
+    const m = body.match(kwRegex);
+    if (!m || m.index === undefined) return null;
+    const parenStart = m.index + m[0].length - 1;
+    let depth = 0;
+    for (let i = parenStart; i < body.length; i++) {
+      if (body[i] === '(') depth++;
+      else if (body[i] === ')') {
+        depth--;
+        if (depth === 0) {
+          return body.substring(parenStart + 1, i).trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  function validateTableRlsPolicies(
+    table: string,
+    sql: string,
+    expectedPolicies: ExpectedRlsPolicy[]
+  ): { valid: boolean; error?: string; policiesFound: string[] } {
+    const escapedTable = table.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, '\\$1');
+    const regex = new RegExp(`CREATE\\s+POLICY\\s+"([^"]+)"\\s+ON\\s+public\\.${escapedTable}([\\s\\S]*?);`, 'gi');
+    const parsed: Array<{ name: string; cmd: string | null; roles: string[]; usingExpr: string | null; withCheckExpr: string | null }> = [];
+    let match;
+    while ((match = regex.exec(sql)) !== null) {
+      const name = match[1];
+      const body = match[2];
+      const cmdMatch = body.match(/FOR\s+(SELECT|INSERT|UPDATE|DELETE|ALL)/i);
+      const cmd = cmdMatch ? cmdMatch[1].toUpperCase() : null;
+      const toMatch = body.match(/TO\s+([a-zA-Z0-9_,\s]+?)(?=\s+USING|\s+WITH\s+CHECK|;|$)/i);
+      const roles = toMatch ? toMatch[1].split(',').map(r => r.trim()) : [];
+      const usingExpr = extractParenthesizedClause(body, 'USING');
+      const withCheckExpr = extractParenthesizedClause(body, 'WITH CHECK');
+      parsed.push({ name, cmd, roles, usingExpr, withCheckExpr });
+    }
+
+    for (const exp of expectedPolicies) {
+      const found = parsed.find(p => p.name === exp.name);
+      if (!found) {
+        return { valid: false, error: `Missing expected policy "${exp.name}" on table ${table}`, policiesFound: parsed.map(p => p.name) };
+      }
+      if (found.cmd !== exp.command) {
+        return { valid: false, error: `Policy "${exp.name}" command mismatch: expected ${exp.command}, got ${found.cmd}`, policiesFound: parsed.map(p => p.name) };
+      }
+      if (!exp.roles.every(r => found.roles.includes(r))) {
+        return { valid: false, error: `Policy "${exp.name}" roles mismatch: expected ${exp.roles.join(',')}, got ${found.roles.join(',')}`, policiesFound: parsed.map(p => p.name) };
+      }
+      if (exp.usingPattern && (!found.usingExpr || !exp.usingPattern.test(found.usingExpr))) {
+        return { valid: false, error: `Policy "${exp.name}" USING clause does not satisfy required pattern`, policiesFound: parsed.map(p => p.name) };
+      }
+      if (exp.withCheckPattern && (!found.withCheckExpr || !exp.withCheckPattern.test(found.withCheckExpr))) {
+        return { valid: false, error: `Policy "${exp.name}" WITH CHECK clause does not satisfy required pattern`, policiesFound: parsed.map(p => p.name) };
+      }
+    }
+
+    return { valid: true, policiesFound: parsed.map(p => p.name) };
+  }
+
+  // Pre-test 5 negative fixtures for the RLS policy validator
+  let rlsNegativeFixturesPassed = true;
+  const validMembersReadPolicy = `
+    CREATE POLICY "members_read_policy" ON public.members
+      FOR SELECT TO authenticated
+      USING (
+        public.is_active_member() AND (
+          auth_user_id = auth.uid() OR
+          (public.get_caller_auth()).user_role IN ('admin', 'super_admin')
+        )
+      );
+  `;
+
+  // Fixture 1: Missing expected policy (members_self_update_policy omitted)
+  const rlsNeg1 = validateTableRlsPolicies('members', validMembersReadPolicy, rlsContracts.members);
+
+  // Fixture 2: Unauthorized role (assigned to 'anon' instead of 'authenticated')
+  const rlsNeg2 = validateTableRlsPolicies('member_invitations', 'CREATE POLICY "invitations_admin_select" ON public.member_invitations FOR SELECT TO anon USING (public.is_active_member() AND (public.get_caller_auth()).user_role IN (\'admin\', \'super_admin\'));', rlsContracts.member_invitations);
+
+  // Fixture 3: SQL command mismatch (declared FOR INSERT instead of FOR SELECT)
+  const rlsNeg3 = validateTableRlsPolicies('member_invitations', 'CREATE POLICY "invitations_admin_select" ON public.member_invitations FOR INSERT TO authenticated WITH CHECK (public.is_active_member());', rlsContracts.member_invitations);
+
+  // Fixture 4: Missing USING clause on SELECT policy
+  const rlsNeg4 = validateTableRlsPolicies('announcements', 'CREATE POLICY "announcements_read_active" ON public.announcements FOR SELECT TO authenticated;', rlsContracts.announcements);
+
+  // Fixture 5: Missing WITH CHECK clause on UPDATE policy
+  const rlsNeg5 = validateTableRlsPolicies('members', validMembersReadPolicy + 'CREATE POLICY "members_self_update_policy" ON public.members FOR UPDATE TO authenticated USING (public.is_active_member() AND auth_user_id = auth.uid());', rlsContracts.members);
+
+  if (
+    rlsNeg1.valid || !rlsNeg1.error?.includes('Missing expected policy') ||
+    rlsNeg2.valid || !rlsNeg2.error?.includes('roles mismatch') ||
+    rlsNeg3.valid || !rlsNeg3.error?.includes('command mismatch') ||
+    rlsNeg4.valid || !rlsNeg4.error?.includes('USING clause') ||
+    rlsNeg5.valid || !rlsNeg5.error?.includes('WITH CHECK clause')
+  ) {
+    rlsNegativeFixturesPassed = false;
+  }
+
   expectedTables.forEach(table => {
     const rlsRegex = new RegExp(`ALTER\\s+TABLE\\s+public\\.${table}\\s+ENABLE\\s+ROW\\s+LEVEL\\s+SECURITY`, 'i');
+    const enabled = rlsRegex.test(allSql);
+    const expected = rlsContracts[table] || [];
+    const policyResult = validateTableRlsPolicies(table, allSql, expected);
+    const passed = enabled && policyResult.valid && rlsNegativeFixturesPassed;
+
+    const policySummary = expected.map(p => `"${p.name}" (${p.command} TO ${p.roles.join(',')}${p.usingPattern ? ' USING' : ''}${p.withCheckPattern ? ' WITH CHECK' : ''})`).join(', ');
+
     assert(
-      rlsRegex.test(allSql),
+      passed,
       'RLS Policies',
       `RLS-${table.toUpperCase()}`,
       `RLS Enabled on public.${table}`,
-      `Found ALTER TABLE public.${table} ENABLE ROW LEVEL SECURITY`
+      `Verified ENABLE ROW LEVEL SECURITY and validated ${expected.length} static migration policy definition(s): ${policySummary}; 5 negative fixtures verified rejecting missing/malformed policies (static contract check, not runtime authorization)`
     );
   });
 
@@ -725,6 +1020,17 @@ async function runPhase01Verification() {
 
   // Export results JSON for reporting
   fs.writeFileSync('scripts/phase01_test_results.json', JSON.stringify(results, null, 2));
+
+  // Synchronize src/data/phase01Data.ts directly from canonical test execution
+  const phaseDataPath = path.resolve('src/data/phase01Data.ts');
+  if (fs.existsSync(phaseDataPath)) {
+    const currentPhaseData = fs.readFileSync(phaseDataPath, 'utf-8');
+    const updatedPhaseData = currentPhaseData.replace(
+      /export const phase01TestResults: TestCase\[\] = \[[\s\S]*?\n\];/,
+      `export const phase01TestResults: TestCase[] = ${JSON.stringify(results, null, 2)};`
+    );
+    fs.writeFileSync(phaseDataPath, updatedPhaseData);
+  }
 
   if (failed > 0) {
     console.error('\nPhase 01 Verification: FAILED');

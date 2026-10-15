@@ -145,6 +145,26 @@
       - `PROC-PREFLIGHT-DO-BLOCK`: Asserts structural and execution flow integrity of `scripts/preflight_schema_check.sql` DO block (valid variable declarations, 11-table array declaration, paired table-presence & RLS FOREACH loops, exception & notice emission) (PASS).
 *   **Remaining Limitations Explicitly Noted:** Offline AST and structural analysis does not execute live PostgreSQL procedural engines, evaluate dynamic SQL strings within `EXECUTE`, or verify foreign key runtime triggers on real data. Full procedural runtime compilation with `plpgsql_check` is recorded as NOT EXECUTED pending a running cloud PostgreSQL instance in Phase 02.
 
+### 7. Phase 01 Audit Remediation: Record Parity, Automated Parity Validation & Deep RLS Policy Verification
+*   **Defect & Impact:** An independent audit identified: (1) stale `SYNTAX-PREFLIGHT` evidence in `src/data/phase01Data.ts` referencing a previous suite index, (2) absence of an automated test guaranteeing JSON and dashboard dataset parity, and (3) Suite 4 RLS verification testing only `ENABLE ROW LEVEL SECURITY` rather than verifying policy names, roles, commands, USING predicates, and WITH CHECK clauses across all 11 core tables.
+*   **Source Location:** `scripts/verify_phase01.ts`, `scripts/validate_parity.ts`, `scripts/phase01_test_results.json`, `src/data/phase01Data.ts`, and `package.json`.
+*   **Corrected Scope & Implementation:**
+    - **Single Canonical Generation & Result Parity:** `scripts/verify_phase01.ts` was updated to write both `scripts/phase01_test_results.json` and update `phase01TestResults` in `src/data/phase01Data.ts` from the identical execution in one atomic pass. All 76 records match exactly across IDs, sequence, suite names, test names, statuses, and evidence.
+    - **Mandatory Automated Parity Validator (`scripts/validate_parity.ts`):** Created a dedicated, non-circular parity validator integrated into `npm test` (`tsx scripts/verify_phase01.ts && tsx scripts/validate_parity.ts`). Verifies exact count (76/76), 100% ID uniqueness, identical sequence ordering, zero field-level discrepancies (`suite`, `id`, `name`, `status`, `evidence`), and presence of all 8 test suites.
+    - **Deep Static RLS Policy Verification:** Updated Suite 4 in `scripts/verify_phase01.ts` with policy contracts across all 11 core tables (`members`, `member_invitations`, `eagles_id_cards`, `announcements`, `attendance_events`, `attendance_records`, `contributions`, `expenses`, `constitution_versions`, `constitution_sections`, `audit_logs`). Parses and validates:
+      - `ENABLE ROW LEVEL SECURITY` statement presence.
+      - Expected policy names and applicable roles (`authenticated`).
+      - SQL commands (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALL`).
+      - Balanced-parenthesis parsing of `USING (...)` predicate expressions.
+      - Balanced-parenthesis parsing of `WITH CHECK (...)` predicate expressions where required (e.g., inserts, updates, and writes).
+    - **5 RLS Negative Fixtures:** Implemented negative tests proving that the RLS policy validator fails closed and rejects:
+      1. Missing policy definitions (e.g., omitting `members_self_update_policy`).
+      2. Unauthorized roles (e.g., policy granting access to `anon`).
+      3. SQL command mismatches (e.g., `SELECT` policy declared as `INSERT`).
+      4. Missing required `USING` clauses on read policies.
+      5. Missing required `WITH CHECK` clauses on mutation policies.
+*   **Remaining Limitations Explicitly Noted:** Static policy inspection verifies migration DDL syntax, roles, and predicate definitions on disk. It does NOT evaluate runtime authorization policies, session cookies, or live database transactions. Live runtime authorization is explicitly recorded as **NOT EXECUTED** pending cloud infrastructure deployment in Phase 02.
+
 ---
 
 ## 2. Phase 01 Automated Verification Summary
@@ -154,9 +174,9 @@
 | **Migration Inventory** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (fs inspection) |
 | **Schema Definitions & Types** | 14 | 14 | 0 | `scripts/verify_phase01.ts` (DDL inspection) |
 | **Architectural Remediations** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (AST/Regex assertions) |
-| **RLS Policy Coverage** | 11 | 11 | 0 | `scripts/verify_phase01.ts` (DDL assertions across all 11 tables) |
+| **RLS Policy Coverage** | 11 | 11 | 0 | `scripts/verify_phase01.ts` (DDL & policy contracts with 5 negative fixtures across all 11 tables) |
 | **Preflight Script Parity** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (SQL contract analysis including `constitution_versions` & shared loop parity) |
 | **Restore Runbook Negative Fixtures** | 9 | 9 | 0 | `scripts/verify_phase01.ts` (`env -i` isolated subshell execution) |
 | **Top-Level SQL AST Validation** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (PostgreSQL `libpg_query` AST parser) |
 | **Offline Procedural Structural & Security Validation** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (structural balance, approved search_path, representative queries, negative fixtures) |
-| **TOTAL** | **76** | **76** | **0** | **100% Pass Rate across 8 Test Suites** |
+| **TOTAL** | **76** | **76** | **0** | **100% Pass Rate across 8 Test Suites (Enforced via `validate_parity.ts`)** |

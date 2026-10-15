@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/verify_phase01.ts"
+    "test": "tsx scripts/verify_phase01.ts && tsx scripts/validate_parity.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

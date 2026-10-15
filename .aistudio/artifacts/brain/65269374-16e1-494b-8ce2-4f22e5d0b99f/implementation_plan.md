@@ -2217,6 +2217,7 @@ All technical architecture, database migrations, security policies, identity tri
 - **Validation Scripts on Disk (`scripts/`):**
   - `scripts/preflight_schema_check.sql` (machine-verifiable PL/pgSQL assertions across 11 tables with shared loop parity)
   - `scripts/restore_database.sh` (hardened transaction-safe restore runbook)
-  - `scripts/verify_phase01.ts` (Phase 01 test runner executing 76 assertions across 8 test suites with isolated negative fixtures, top-level AST parsing, and offline procedural structural and security validation)
-- **Execution Evidence:** 76 assertions executed (`npm test`), 76 PASS, 0 FAIL.
+  - `scripts/verify_phase01.ts` (Phase 01 test runner executing 76 assertions across 8 test suites with isolated restore fixtures, top-level AST parsing, offline procedural structural and security validation, and static RLS policy contract verification across all 11 core tables with 5 negative rejection fixtures)
+  - `scripts/validate_parity.ts` (automated parity validator integrated into `npm test` enforcing 100% parity across record counts, ID uniqueness, ordering, and fields between JSON and dashboard datasets)
+- **Execution Evidence:** 76 assertions executed (`npm test`), 76 PASS, 0 FAIL; automated parity validation PASSED (100%).
 - **Runtime Cloud Database Tests:** Marked **NOT EXECUTED** pending cloud provisioning.
