@@ -1,5 +1,5 @@
 {
-  "summary": "AGILA Hub Android Phase 01 Verification Matrix updated to Revision 4.1: asserts 11 core tables (including public.constitution_versions), 76 automated assertions across 8 test suites with 100% PASS, isolated restore negative fixtures, top-level PostgreSQL AST syntax validation, and offline procedural structural and security validation.",
+  "summary": "AGILA Hub Android Phase 01 Verification Matrix updated to Revision 4.2: asserts 11 core tables (including public.constitution_versions), 76 automated assertions across 13 granular test suites authoritatively grouped into 8 functional domains with 100% PASS, exact RLS role-set equality with 6 negative fixtures, hardened staged result synchronization, isolated restore negative fixtures, and top-level PostgreSQL AST syntax validation.",
   "updatedAt": "2026-10-15T02:30:00.000000000Z",
   "userFacing": true
 }

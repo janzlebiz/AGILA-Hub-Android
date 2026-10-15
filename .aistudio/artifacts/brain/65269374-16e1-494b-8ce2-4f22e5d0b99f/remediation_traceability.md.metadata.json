@@ -1,5 +1,5 @@
 {
-  "summary": "AGILA Hub Android Remediation Traceability Matrix updated to Revision 4.1: details 11 core tables including public.constitution_versions, isolated restore fixtures under env -i, PostgreSQL AST syntax validation suite, and 76/76 automated assertions across 8 test suites.",
+  "summary": "AGILA Hub Android Remediation Traceability Matrix updated to Revision 4.2: details 11 core tables, exact RLS role-set equality with 6 negative rejection fixtures, hardened staged result synchronization with 3 pre-sync negative fixtures, isolated restore fixtures under env -i, PostgreSQL AST syntax validation suite, and 76/76 automated assertions across 13 granular test suites authoritatively grouped into 8 functional domains.",
   "updatedAt": "2026-10-15T02:30:00.000000000Z",
   "userFacing": true
 }

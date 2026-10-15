@@ -26,7 +26,7 @@ function assert(condition: boolean, suite: string, id: string, name: string, evi
 async function runPhase01Verification() {
   console.log('================================================================');
   console.log('   AGILA Hub Android — Phase 01 Automated Verification Suite   ');
-  console.log('   Revision 4.1: Isolated Fixtures, AST Parsing, 11 Core Tables, 8 Suites   ');
+  console.log('   Revision 4.2: 13 Granular Suites across 8 Functional Domains (76 Assertions)   ');
   console.log('================================================================\n');
 
   // ---------------------------------------------------------
@@ -1024,7 +1024,7 @@ async function runPhase01Verification() {
   );
 
   // ---------------------------------------------------------
-  // SUMMARY & EXIT
+  // SUMMARY, HARDENED SYNCHRONIZATION & NEGATIVE FIXTURES
   // ---------------------------------------------------------
   console.log('\n================================================================');
   console.log('                 VERIFICATION SUMMARY RESULTS                   ');
@@ -1034,26 +1034,180 @@ async function runPhase01Verification() {
   console.log(`Total Assertions Executed: ${results.length}`);
   console.log(`PASS: ${passed}`);
   console.log(`FAIL: ${failed}`);
+  console.log('Test Suite Architecture: 13 Granular Suites grouped across 8 Functional Domains');
 
-  // Export results JSON for reporting
-  fs.writeFileSync('scripts/phase01_test_results.json', JSON.stringify(results, null, 2));
-
-  // Synchronize src/data/phase01Data.ts directly from canonical test execution
-  const phaseDataPath = path.resolve('src/data/phase01Data.ts');
-  if (fs.existsSync(phaseDataPath)) {
-    const currentPhaseData = fs.readFileSync(phaseDataPath, 'utf-8');
-    const updatedPhaseData = currentPhaseData.replace(
-      /export const phase01TestResults: TestCase\[\] = \[[\s\S]*?\n\];/,
-      `export const phase01TestResults: TestCase[] = ${JSON.stringify(results, null, 2)};`
-    );
-    fs.writeFileSync(phaseDataPath, updatedPhaseData);
+  // Hardened result synchronization functions
+  function validateGeneratedJson(rawJson: string, expectedCount: number): TestResult[] {
+    if (!rawJson || rawJson.trim().length === 0) {
+      throw new Error('Generated results JSON is empty');
+    }
+    let parsed: any;
+    try {
+      parsed = JSON.parse(rawJson);
+    } catch (err: any) {
+      throw new Error(`Generated results JSON is not valid JSON: ${err.message}`);
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('Generated results JSON is not an array');
+    }
+    if (parsed.length !== expectedCount) {
+      throw new Error(`Generated results JSON length mismatch: expected ${expectedCount}, got ${parsed.length}`);
+    }
+    for (const item of parsed) {
+      if (!item.suite || !item.id || !item.name || !item.status || !item.evidence) {
+        throw new Error(`Generated results JSON record missing required fields: ${JSON.stringify(item)}`);
+      }
+    }
+    return parsed as TestResult[];
   }
+
+  function validateGeneratedPhaseData(rawTs: string, expectedCount: number): void {
+    if (!rawTs || rawTs.trim().length === 0) {
+      throw new Error('Generated phase01Data content is empty');
+    }
+    if (!rawTs.includes('export const phase01TestResults: TestCase[] = [')) {
+      throw new Error('Generated phase01Data content missing required "export const phase01TestResults: TestCase[] = [" declaration');
+    }
+    if (!rawTs.includes('export interface TestCase') || !rawTs.includes('export interface MigrationItem')) {
+      throw new Error('Generated phase01Data content missing required type interface exports');
+    }
+    if (!rawTs.includes('"id": "MIG-INV-01"') || !rawTs.includes('"id": "PROC-PREFLIGHT-DO-BLOCK"')) {
+      throw new Error('Generated phase01Data content missing expected boundary test identifiers');
+    }
+    const passCount = (rawTs.match(/"status":\s*"PASS"/g) || []).length;
+    if (passCount !== expectedCount) {
+      throw new Error(`Generated phase01Data content status count mismatch: expected ${expectedCount} PASS records, found ${passCount}`);
+    }
+  }
+
+  function synchronizeResults(
+    testResults: TestResult[],
+    customPaths?: { jsonPath?: string; phaseDataPath?: string }
+  ): { jsonPath: string; phaseDataPath: string } {
+    const jsonPath = customPaths?.jsonPath || path.resolve('scripts/phase01_test_results.json');
+    const phaseDataPath = customPaths?.phaseDataPath || path.resolve('src/data/phase01Data.ts');
+
+    if (!Array.isArray(testResults) || testResults.length === 0) {
+      throw new Error('Cannot synchronize empty or non-array test results');
+    }
+
+    // 1. Validate generated JSON before replacing existing files
+    const jsonOutput = JSON.stringify(testResults, null, 2);
+    validateGeneratedJson(jsonOutput, testResults.length);
+
+    // Staged write to temporary file, then filesystem rename (crash-safe staged replacement)
+    const tempJsonPath = `${jsonPath}.tmp`;
+    fs.writeFileSync(tempJsonPath, jsonOutput, 'utf-8');
+    if (!fs.existsSync(tempJsonPath) || fs.statSync(tempJsonPath).size === 0) {
+      throw new Error(`Failed to stage JSON results to temporary file: ${tempJsonPath}`);
+    }
+    fs.renameSync(tempJsonPath, jsonPath);
+
+    // 2. Validate target dashboard file existence — DO NOT SILENTLY SKIP
+    if (!fs.existsSync(phaseDataPath)) {
+      throw new Error(`Synchronization failure: target dashboard file not found at ${phaseDataPath}`);
+    }
+
+    // Read current dashboard file and check for target export pattern — DO NOT SILENTLY SKIP MALFORMED EXPORTS
+    const currentPhaseData = fs.readFileSync(phaseDataPath, 'utf-8');
+    const exportRegex = /export const phase01TestResults: TestCase\[\] = \[[\s\S]*?\n\];/;
+    if (!exportRegex.test(currentPhaseData)) {
+      throw new Error(`Synchronization failure: target file ${phaseDataPath} has missing or malformed "phase01TestResults" export declaration`);
+    }
+
+    // Generate updated dashboard content
+    const updatedPhaseData = currentPhaseData.replace(
+      exportRegex,
+      `export const phase01TestResults: TestCase[] = ${jsonOutput};`
+    );
+
+    // Validate generated output before replacing existing file
+    validateGeneratedPhaseData(updatedPhaseData, testResults.length);
+
+    // Staged write to temporary file, then filesystem rename (crash-safe staged replacement)
+    const tempPhaseDataPath = `${phaseDataPath}.tmp`;
+    fs.writeFileSync(tempPhaseDataPath, updatedPhaseData, 'utf-8');
+    if (!fs.existsSync(tempPhaseDataPath) || fs.statSync(tempPhaseDataPath).size === 0) {
+      throw new Error(`Failed to stage dashboard data to temporary file: ${tempPhaseDataPath}`);
+    }
+    fs.renameSync(tempPhaseDataPath, phaseDataPath);
+
+    return { jsonPath, phaseDataPath };
+  }
+
+  // Pre-synchronization Negative Fixtures: Prove validator strictly rejects missing/malformed exports
+  function runSynchronizationNegativeFixtures(): void {
+    const fixtureResults: TestResult[] = [
+      { suite: 'Sample Suite', id: 'SMP-01', name: 'Sample Test', status: 'PASS', evidence: 'Sample Evidence' }
+    ];
+
+    // Negative Fixture 1: Target file does not exist -> must fail with descriptive error
+    let missingFileRejected = false;
+    try {
+      synchronizeResults(fixtureResults, {
+        phaseDataPath: path.resolve('src/data/.nonexistent_fixture_phase01Data.ts')
+      });
+    } catch (err: any) {
+      if (err.message && err.message.includes('target dashboard file not found')) {
+        missingFileRejected = true;
+      }
+    }
+
+    if (!missingFileRejected) {
+      throw new Error('Synchronization hardening failed: negative fixture for missing target dashboard file was NOT rejected');
+    }
+
+    // Negative Fixture 2: Target file has missing or malformed phase01TestResults export -> must fail
+    let malformedExportRejected = false;
+    const tempMalformedPath = path.resolve('src/data/.test_malformed_phase01Data.ts');
+    try {
+      fs.writeFileSync(tempMalformedPath, '// Malformed test file\nexport const otherExport = [];\n', 'utf-8');
+      synchronizeResults(fixtureResults, {
+        phaseDataPath: tempMalformedPath
+      });
+    } catch (err: any) {
+      if (err.message && err.message.includes('missing or malformed "phase01TestResults" export declaration')) {
+        malformedExportRejected = true;
+      }
+    } finally {
+      if (fs.existsSync(tempMalformedPath)) {
+        fs.unlinkSync(tempMalformedPath);
+      }
+    }
+
+    if (!malformedExportRejected) {
+      throw new Error('Synchronization hardening failed: negative fixture for malformed target dashboard export was NOT rejected');
+    }
+
+    // Negative Fixture 3: Generated output validation rejects invalid/incomplete phase data
+    let invalidOutputRejected = false;
+    try {
+      validateGeneratedPhaseData('export const broken = true;', 76);
+    } catch (err: any) {
+      if (err.message && err.message.includes('missing required "export const phase01TestResults')) {
+        invalidOutputRejected = true;
+      }
+    }
+
+    if (!invalidOutputRejected) {
+      throw new Error('Synchronization hardening failed: negative fixture for invalid generated dashboard output was NOT rejected');
+    }
+
+    console.log('[PASS] [Synchronization Guard] Negative Fixtures: Successfully verified rejection of missing target file, malformed dashboard export, and invalid generated output.');
+  }
+
+  // Execute synchronization negative failure fixtures first
+  runSynchronizationNegativeFixtures();
+
+  // Perform validated, staged synchronization
+  synchronizeResults(results);
+  console.log('[PASS] [Synchronization] Canonically synchronized scripts/phase01_test_results.json and src/data/phase01Data.ts');
 
   if (failed > 0) {
     console.error('\nPhase 01 Verification: FAILED');
     process.exit(1);
   } else {
-    console.log(`\nPhase 01 Verification: ALL ${results.length} ASSERTIONS PASSED (100%)`);
+    console.log(`\nPhase 01 Verification: ALL ${results.length} ASSERTIONS PASSED (100%) across 13 Granular Suites (8 Functional Domains)`);
   }
 }
 

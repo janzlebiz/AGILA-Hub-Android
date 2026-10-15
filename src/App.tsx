@@ -123,7 +123,7 @@ export default function App() {
       specStatus: 'PASS',
       runtimeStatus: 'NOT EXECUTED',
       gate: 'CI/CD Gate',
-      notes: '76 automated assertions across 8 test suites (100% PASS); automated parity enforced via validate_parity.ts'
+      notes: '76 automated assertions across 13 granular test suites (8 functional domains) (100% PASS); parity enforced via validate_parity.ts'
     },
     {
       id: 'P1-SYNTAX-01',
@@ -422,7 +422,7 @@ export default function App() {
                     TFOE-PE Bantayog Elite Eagles Club — Phase 01 Foundation
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    All 9 SQL migrations, the machine-verifiable preflight check script, and the hardened transaction-safe restore runbook have been materialized on disk. 76 automated test assertions have executed across 8 test suites with 100% PASS rate, covering top-level SQL AST DDL parsing, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures. Production infrastructure provisioning and live database operations remain strictly unexecuted to preserve deployment boundaries.
+                    All 9 SQL migrations, the machine-verifiable preflight check script, and the hardened transaction-safe restore runbook have been materialized on disk. 76 automated test assertions have executed across 13 granular test suites (authoritatively grouped into 8 functional domains) with 100% PASS rate, covering top-level SQL AST DDL parsing, approved pg_catalog, public search_path lockdown, representative query parsing, negative security/malformed SQL fixtures, and hardened staged result synchronization. Production infrastructure provisioning and live database operations remain strictly unexecuted to preserve deployment boundaries.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[260px]">
@@ -460,7 +460,7 @@ export default function App() {
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Automated Test Suite</div>
                 <p className="text-xs text-slate-300">
-                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 8 test suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, static RLS policy contracts (names, roles with exact role-set equality, commands, USING/WITH CHECK) with 6 negative fixtures across 11 core tables, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, negative security/malformed SQL fixtures, and automated dataset parity validation via validate_parity.ts.
+                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 13 granular test suites / 8 functional domains): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, static RLS policy contracts (names, roles with exact role-set equality, commands, USING/WITH CHECK) with 6 negative fixtures across 11 core tables, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, negative security/malformed SQL fixtures, hardened staged result synchronization with negative failure fixtures, and automated dataset parity validation via validate_parity.ts.
                 </p>
               </div>
 
@@ -504,9 +504,12 @@ export default function App() {
                   <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
                     76 / 76 PASSED (100%)
                   </span>
+                  <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 text-xs font-bold border border-sky-500/30">
+                    13 Suites · 8 Domains
+                  </span>
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Executed via <code className="text-sky-300">npm test</code> (<code className="text-sky-300">scripts/verify_phase01.ts</code>). Covers inventories, DDL declarations, architectural remediations, isolated negative fixtures, top-level SQL AST syntax validation, and offline procedural structural and security validation across 8 test suites.
+                  Executed via <code className="text-sky-300">npm test</code> (<code className="text-sky-300">scripts/verify_phase01.ts</code> & <code className="text-sky-300">scripts/validate_parity.ts</code>). Covers inventories, DDL declarations, architectural remediations, isolated negative fixtures, top-level SQL AST syntax validation, and offline procedural structural and security validation across 13 granular test suites (8 functional domains).
                 </p>
               </div>
 

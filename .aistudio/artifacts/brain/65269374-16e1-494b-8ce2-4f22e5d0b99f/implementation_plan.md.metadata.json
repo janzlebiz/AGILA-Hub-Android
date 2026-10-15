@@ -1,5 +1,5 @@
 {
-  "summary": "AGILA Hub Android — Master Architecture & Phase 01 Implementation Plan, Revision 4.1. Details all 9 materialized migrations, preflight schema check script across 11 tables with shared loop parity, hardened database restore runbook with isolated negative fixtures, top-level PostgreSQL AST syntax validation via libpg_query, and offline procedural structural and security validation, verified via 76 automated test assertions across 8 test suites with zero failures.",
+  "summary": "AGILA Hub Android — Master Architecture & Phase 01 Implementation Plan, Revision 4.2. Details all 9 materialized migrations, preflight schema check script across 11 tables with shared loop parity, hardened database restore runbook with isolated negative fixtures, top-level PostgreSQL AST syntax validation via libpg_query, offline procedural structural and security validation, exact RLS role-set equality with 6 negative rejection fixtures, and hardened staged result synchronization, verified via 76 automated test assertions across 13 granular test suites authoritatively grouped into 8 functional domains with zero failures.",
   "updatedAt": "2026-10-15T02:30:00.000000000Z",
   "requestFeedback": true,
   "userFacing": true
