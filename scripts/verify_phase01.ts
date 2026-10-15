@@ -1080,12 +1080,19 @@ async function runPhase01Verification() {
     }
   }
 
+  interface SynchronizeOptions {
+    jsonPath?: string;
+    phaseDataPath?: string;
+    _faultInjectDashboardRename?: boolean;
+    _faultInjectRollback?: boolean;
+  }
+
   function synchronizeResults(
     testResults: TestResult[],
-    customPaths?: { jsonPath?: string; phaseDataPath?: string }
+    options?: SynchronizeOptions
   ): { jsonPath: string; phaseDataPath: string } {
-    const jsonPath = customPaths?.jsonPath || path.resolve('scripts/phase01_test_results.json');
-    const phaseDataPath = customPaths?.phaseDataPath || path.resolve('src/data/phase01Data.ts');
+    const jsonPath = options?.jsonPath || path.resolve('scripts/phase01_test_results.json');
+    const phaseDataPath = options?.phaseDataPath || path.resolve('src/data/phase01Data.ts');
 
     if (!Array.isArray(testResults) || testResults.length === 0) {
       throw new Error('Cannot synchronize empty or non-array test results');
@@ -1124,6 +1131,11 @@ async function runPhase01Verification() {
     const stagePhaseDataPath = `${phaseDataPath}.stage.${uniqueNonce}`;
     const backupJsonPath = `${jsonPath}.bak.${uniqueNonce}`;
 
+    const jsonExistedInitially = fs.existsSync(jsonPath);
+    let backupCreated = false;
+    let jsonReplaced = false;
+    let backupPreservedForManualRecovery = false;
+
     try {
       fs.writeFileSync(stageJsonPath, jsonOutput, 'utf-8');
       if (!fs.existsSync(stageJsonPath) || fs.statSync(stageJsonPath).size === 0) {
@@ -1136,13 +1148,13 @@ async function runPhase01Verification() {
       }
 
       // Phase 4: Staged replacement with recovery/rollback handling between file renames
-      // Note: Two distinct filesystem renames are not transactionally atomic.
+      // Note: Two distinct filesystem renames are not transactionally atomic across separate paths.
       // Staged preparation and rollback recovery guard against intermediate corruption.
-      let jsonReplaced = false;
 
       // Backup existing JSON file if present to enable rollback if dashboard rename fails
-      if (fs.existsSync(jsonPath)) {
+      if (jsonExistedInitially) {
         fs.copyFileSync(jsonPath, backupJsonPath);
+        backupCreated = true;
       }
 
       try {
@@ -1150,21 +1162,52 @@ async function runPhase01Verification() {
         fs.renameSync(stageJsonPath, jsonPath);
         jsonReplaced = true;
 
-        // Replace File 2: Dashboard TypeScript dataset
+        // Replace File 2: Dashboard TypeScript dataset (with optional fault injection for test verification)
+        if (options?._faultInjectDashboardRename) {
+          throw new Error('Injected fault: Dashboard rename failed');
+        }
         fs.renameSync(stagePhaseDataPath, phaseDataPath);
 
         // Clean up backup upon successful replacement of both files
-        if (fs.existsSync(backupJsonPath)) {
+        if (backupCreated && fs.existsSync(backupJsonPath)) {
           fs.unlinkSync(backupJsonPath);
         }
       } catch (renameErr: any) {
-        // Rollback recovery: If JSON was replaced but dashboard replacement failed, restore JSON
-        if (jsonReplaced && fs.existsSync(backupJsonPath)) {
-          try {
-            fs.copyFileSync(backupJsonPath, jsonPath);
-            fs.unlinkSync(backupJsonPath);
-          } catch (rollbackErr: any) {
-            console.error(`CRITICAL: Rollback failed for ${jsonPath}:`, rollbackErr);
+        // Rollback recovery: If JSON was replaced but dashboard replacement failed,
+        // restore original JSON (if pre-existing) or remove newly created JSON (if initially absent).
+        if (jsonReplaced) {
+          if (jsonExistedInitially && backupCreated && fs.existsSync(backupJsonPath)) {
+            try {
+              if (options?._faultInjectRollback) {
+                throw new Error('Injected fault: Rollback restoration failed');
+              }
+              fs.copyFileSync(backupJsonPath, jsonPath);
+              // Clean up backup only on successful rollback
+              fs.unlinkSync(backupJsonPath);
+            } catch (rollbackErr: any) {
+              // Rollback failed! Never delete the backup. Preserve it and report exact path.
+              backupPreservedForManualRecovery = true;
+              console.error(`\nCRITICAL: Automatic rollback failed for ${jsonPath}!`);
+              console.error(`RECOVERY REQUIRED: Backup file preserved at: ${backupJsonPath}`);
+              throw new Error(
+                `CRITICAL RECOVERY REQUIRED: Dashboard replacement failed and rollback could not restore ${jsonPath}. ` +
+                `Original backup is preserved at ${backupJsonPath}. Cause: ${rollbackErr.message}`
+              );
+            }
+          } else if (!jsonExistedInitially && fs.existsSync(jsonPath)) {
+            // No initial JSON existed, so rollback means removing the newly created file
+            try {
+              if (options?._faultInjectRollback) {
+                throw new Error('Injected fault: Rollback removal of new JSON failed');
+              }
+              fs.unlinkSync(jsonPath);
+            } catch (rollbackErr: any) {
+              console.error(`\nCRITICAL: Automatic cleanup of newly created ${jsonPath} failed!`);
+              throw new Error(
+                `CRITICAL RECOVERY REQUIRED: Dashboard replacement failed and rollback could not remove newly created ${jsonPath}. ` +
+                `Cause: ${rollbackErr.message}`
+              );
+            }
           }
         }
         throw renameErr;
@@ -1177,7 +1220,8 @@ async function runPhase01Verification() {
       if (fs.existsSync(stagePhaseDataPath)) {
         try { fs.unlinkSync(stagePhaseDataPath); } catch {}
       }
-      if (fs.existsSync(backupJsonPath)) {
+      // Clean up backup only if it was NOT preserved for manual recovery
+      if (backupCreated && fs.existsSync(backupJsonPath) && !backupPreservedForManualRecovery) {
         try { fs.unlinkSync(backupJsonPath); } catch {}
       }
     }
@@ -1185,8 +1229,8 @@ async function runPhase01Verification() {
     return { jsonPath, phaseDataPath };
   }
 
-  // Pre-synchronization Negative Fixtures: Prove validator strictly rejects missing/malformed targets
-  // and operates exclusively on isolated temporary files without modifying canonical files
+  // Pre-synchronization Negative Fixtures & Fault-Injection Tests:
+  // Strictly operates on isolated temporary files without modifying canonical files
   function runSynchronizationNegativeFixtures(): void {
     const canonicalJsonPath = path.resolve('scripts/phase01_test_results.json');
     const canonicalDashboardPath = path.resolve('src/data/phase01Data.ts');
@@ -1282,8 +1326,94 @@ async function runPhase01Verification() {
         throw new Error('Synchronization hardening failed: negative fixture for invalid generated dashboard output was NOT rejected');
       }
 
-      // Negative Fixture 4: Canonical Byte-for-Byte Invariance Verification
-      // Prove that missing/malformed targets in negative fixtures leave both canonical files byte-for-byte unchanged
+      // Negative Fixture 4: Fault-Injection — Dashboard Rename Failure with Pre-existing JSON -> Successful Rollback
+      // Verifies that isolatedJsonPath is restored byte-for-byte to its original content and backup cleaned up
+      let dashboardFaultTriggered = false;
+      try {
+        synchronizeResults(fixtureResults, {
+          jsonPath: isolatedJsonPath,
+          phaseDataPath: isolatedDashboardPath,
+          _faultInjectDashboardRename: true
+        });
+      } catch (err: any) {
+        if (err.message && err.message.includes('Injected fault: Dashboard rename failed')) {
+          dashboardFaultTriggered = true;
+        }
+      }
+
+      if (!dashboardFaultTriggered) {
+        throw new Error('Fault injection failed: dashboard rename failure was not triggered');
+      }
+
+      // Confirm byte-for-byte restoration of pre-existing JSON target
+      if (!fs.readFileSync(isolatedJsonPath).equals(isolatedJsonInitialBytes)) {
+        throw new Error('Rollback failure: pre-existing JSON target was not restored byte-for-byte upon dashboard rename failure');
+      }
+
+      // Negative Fixture 5: Fault-Injection — Dashboard Rename Failure with Initially Absent JSON -> Successful Rollback
+      // Verifies that newly created JSON target is removed when no original existed
+      const absentJsonPath = path.join(isolatedDir, 'absent_fixture_results.json');
+      let absentJsonFaultTriggered = false;
+      try {
+        synchronizeResults(fixtureResults, {
+          jsonPath: absentJsonPath,
+          phaseDataPath: isolatedDashboardPath,
+          _faultInjectDashboardRename: true
+        });
+      } catch (err: any) {
+        if (err.message && err.message.includes('Injected fault: Dashboard rename failed')) {
+          absentJsonFaultTriggered = true;
+        }
+      }
+
+      if (!absentJsonFaultTriggered) {
+        throw new Error('Fault injection failed: absent JSON rename failure was not triggered');
+      }
+
+      // Confirm newly created JSON was removed upon rollback
+      if (fs.existsSync(absentJsonPath)) {
+        throw new Error('Rollback failure: newly created JSON target was not removed upon dashboard rename failure');
+      }
+
+      // Negative Fixture 6: Fault-Injection — Rollback Failure -> Backup Preserved, Exact Path Reported, Recovery Error
+      // Verifies backup is preserved on disk, path reported in error, and process fails fast with recovery-required error
+      let rollbackFailureTriggered = false;
+      let reportedBackupPath = '';
+      try {
+        synchronizeResults(fixtureResults, {
+          jsonPath: isolatedJsonPath,
+          phaseDataPath: isolatedDashboardPath,
+          _faultInjectDashboardRename: true,
+          _faultInjectRollback: true
+        });
+      } catch (err: any) {
+        if (err.message && err.message.includes('CRITICAL RECOVERY REQUIRED') && err.message.includes('Original backup is preserved at')) {
+          rollbackFailureTriggered = true;
+          const match = err.message.match(/Original backup is preserved at ([^\s]+)\./);
+          if (match) {
+            reportedBackupPath = match[1];
+          }
+        }
+      }
+
+      if (!rollbackFailureTriggered) {
+        throw new Error('Fault injection failed: rollback failure error with recovery requirement was not triggered');
+      }
+
+      if (!reportedBackupPath || !fs.existsSync(reportedBackupPath)) {
+        throw new Error(`Rollback failure guard failed: backup file was deleted or not preserved at reported path "${reportedBackupPath}"`);
+      }
+
+      // Verify preserved backup is byte-for-byte identical to the original JSON content
+      if (!fs.readFileSync(reportedBackupPath).equals(isolatedJsonInitialBytes)) {
+        throw new Error('Rollback failure guard failed: preserved backup content does not match original JSON content');
+      }
+
+      // Clean up the preserved test backup
+      try { fs.unlinkSync(reportedBackupPath); } catch {}
+
+      // Negative Fixture 7: Canonical Byte-for-Byte Invariance Verification
+      // Prove that missing/malformed targets and fault injections leave both canonical files byte-for-byte unchanged
       if (canonicalJsonBefore) {
         const canonicalJsonAfter = fs.readFileSync(canonicalJsonPath);
         if (!canonicalJsonBefore.equals(canonicalJsonAfter)) {
@@ -1297,7 +1427,7 @@ async function runPhase01Verification() {
         }
       }
 
-      console.log('[PASS] [Synchronization Guard] Negative Fixtures: Confirmed rejection of missing targets, malformed exports, and invalid outputs on isolated files with canonical byte-for-byte invariance.');
+      console.log('[PASS] [Synchronization Guard] Negative Fixtures & Fault Injections: Confirmed rejection of missing/malformed targets, byte-for-byte rollback on rename failures, backup preservation on rollback failures, and canonical byte invariance.');
     } finally {
       if (fs.existsSync(isolatedDir)) {
         try { fs.rmSync(isolatedDir, { recursive: true, force: true }); } catch {}
