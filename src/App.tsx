@@ -123,7 +123,7 @@ export default function App() {
       specStatus: 'PASS',
       runtimeStatus: 'NOT EXECUTED',
       gate: 'CI/CD Gate',
-      notes: '76 automated assertions executed across 7 suites with 100% PASS'
+      notes: '76 automated assertions executed across 8 test suites with 100% PASS'
     },
     {
       id: 'P1-SYNTAX-01',
@@ -136,8 +136,8 @@ export default function App() {
     },
     {
       id: 'P1-PROC-01',
-      requirement: 'Offline PL/pgSQL Procedural Body Validation',
-      target: 'Procedural Parser on 14 Functions & 9 DO Blocks',
+      requirement: 'Offline Procedural Structural and Security Validation',
+      target: 'Offline Procedural Structural and Security Validation on 14 Functions & 9 DO Blocks',
       specStatus: 'PASS',
       runtimeStatus: 'NOT EXECUTED',
       gate: 'Schema Gate',
@@ -422,7 +422,7 @@ export default function App() {
                     TFOE-PE Bantayog Elite Eagles Club — Phase 01 Foundation
                   </h1>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    All 9 SQL migrations, the machine-verifiable preflight check script, and the hardened transaction-safe restore runbook have been materialized on disk. 76 automated test assertions have executed across 7 suites with 100% PASS rate, covering top-level SQL AST DDL parsing, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures. Production infrastructure provisioning and live database operations remain strictly unexecuted to preserve deployment boundaries.
+                    All 9 SQL migrations, the machine-verifiable preflight check script, and the hardened transaction-safe restore runbook have been materialized on disk. 76 automated test assertions have executed across 8 test suites with 100% PASS rate, covering top-level SQL AST DDL parsing, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures. Production infrastructure provisioning and live database operations remain strictly unexecuted to preserve deployment boundaries.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-[260px]">
@@ -460,7 +460,7 @@ export default function App() {
               <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 space-y-2">
                 <div className="text-emerald-400 font-bold text-xs uppercase tracking-wider">2. Automated Test Suite</div>
                 <p className="text-xs text-slate-300">
-                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 7 suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures.
+                  Executed <code className="text-emerald-300">npm test</code> (76 assertions across 8 test suites): verified schema AST, table coverage, column types, RAG 0.68 floor, 8 isolated restore negative fixtures, top-level SQL AST syntax validation, approved pg_catalog, public search_path lockdown, representative query parsing, and negative security/malformed SQL fixtures.
                 </p>
               </div>
 
@@ -506,7 +506,7 @@ export default function App() {
                   </span>
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Executed via <code className="text-sky-300">npm test</code> (<code className="text-sky-300">scripts/verify_phase01.ts</code>). Covers inventories, DDL declarations, architectural remediations, isolated negative fixtures, top-level SQL AST syntax validation, and offline PL/pgSQL procedural body structural/security validation across 7 test suites.
+                  Executed via <code className="text-sky-300">npm test</code> (<code className="text-sky-300">scripts/verify_phase01.ts</code>). Covers inventories, DDL declarations, architectural remediations, isolated negative fixtures, top-level SQL AST syntax validation, and offline procedural structural and security validation across 8 test suites.
                 </p>
               </div>
 

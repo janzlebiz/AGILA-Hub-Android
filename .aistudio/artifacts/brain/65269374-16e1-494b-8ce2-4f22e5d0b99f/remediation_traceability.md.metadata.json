@@ -1,5 +1,5 @@
 {
-  "summary": "AGILA Hub Android Remediation Traceability Matrix updated to Revision 4.1: details 11 core tables including public.constitution_versions, isolated restore fixtures under env -i, PostgreSQL AST syntax validation suite, and 70/70 automated assertions.",
-  "updatedAt": "2026-10-14T05:30:01.382852635Z",
+  "summary": "AGILA Hub Android Remediation Traceability Matrix updated to Revision 4.1: details 11 core tables including public.constitution_versions, isolated restore fixtures under env -i, PostgreSQL AST syntax validation suite, and 76/76 automated assertions across 8 test suites.",
+  "updatedAt": "2026-10-15T02:30:00.000000000Z",
   "userFacing": true
 }

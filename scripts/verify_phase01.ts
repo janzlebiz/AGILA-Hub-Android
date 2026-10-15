@@ -26,7 +26,7 @@ function assert(condition: boolean, suite: string, id: string, name: string, evi
 async function runPhase01Verification() {
   console.log('================================================================');
   console.log('   AGILA Hub Android — Phase 01 Automated Verification Suite   ');
-  console.log('   Revision 4.1: Isolated Fixtures, AST Parsing, 11 Core Tables  ');
+  console.log('   Revision 4.1: Isolated Fixtures, AST Parsing, 11 Core Tables, 8 Suites   ');
   console.log('================================================================\n');
 
   // ---------------------------------------------------------
@@ -206,7 +206,9 @@ async function runPhase01Verification() {
     'match_constitution_sections clamps threshold with GREATEST(0.68, ...)'
   );
 
-  // RLS Assertion: row security enabled across all 11 tables
+  // ---------------------------------------------------------
+  // SUITE 4: RLS Policy Coverage on Core Tables
+  // ---------------------------------------------------------
   expectedTables.forEach(table => {
     const rlsRegex = new RegExp(`ALTER\\s+TABLE\\s+public\\.${table}\\s+ENABLE\\s+ROW\\s+LEVEL\\s+SECURITY`, 'i');
     assert(
@@ -219,7 +221,7 @@ async function runPhase01Verification() {
   });
 
   // ---------------------------------------------------------
-  // SUITE 4: Preflight Validation Script Contract Parity
+  // SUITE 5: Preflight Validation Script Contract Parity
   // ---------------------------------------------------------
   const preflightFile = path.resolve('scripts/preflight_schema_check.sql');
   assert(
@@ -295,7 +297,7 @@ async function runPhase01Verification() {
   );
 
   // ---------------------------------------------------------
-  // SUITE 5: Restore Runbook Negative Fixture Tests (Isolated Environment)
+  // SUITE 6: Restore Runbook Negative Fixture Tests (Isolated Environment)
   // ---------------------------------------------------------
   const restoreScript = path.resolve('scripts/restore_database.sh');
   assert(
@@ -428,7 +430,7 @@ async function runPhase01Verification() {
   );
 
   // ---------------------------------------------------------
-  // SUITE 6: Top-Level SQL AST Validation (PostgreSQL libpg_query DDL Parser)
+  // SUITE 7: Top-Level SQL AST Validation (PostgreSQL libpg_query DDL Parser)
   //
   // Scope Clarification:
   // libpg_query validates top-level PostgreSQL SQL DDL/DML AST syntax (CREATE TABLE,
@@ -436,7 +438,7 @@ async function runPhase01Verification() {
   // When parsing CREATE FUNCTION or DO blocks, libpg_query parses the outer statement
   // and treats the dollar-quoted ($$) procedural body as an opaque string literal constant.
   // It does NOT parse or compile the internal PL/pgSQL statements inside that string literal.
-  // Suite 7 below provides dedicated offline validation of those procedural bodies.
+  // Suite 8 below provides dedicated offline validation of those procedural bodies.
   // ---------------------------------------------------------
   for (const file of expectedMigrations) {
     const filePath = path.join(migrationsDir, file);
@@ -471,7 +473,7 @@ async function runPhase01Verification() {
       'Top-Level SQL AST Validation',
       'SYNTAX-PREFLIGHT',
       'Preflight Script Validates Top-Level PostgreSQL AST Syntax',
-      `Parsed ${preflightStmts} top-level DO-block statement via libpg_query (inner PL/pgSQL verified in Suite 7)`
+      `Parsed ${preflightStmts} top-level DO-block statement via libpg_query (inner PL/pgSQL verified in Suite 8)`
     );
   } catch (err: any) {
     assert(
@@ -484,7 +486,7 @@ async function runPhase01Verification() {
   }
 
   // ---------------------------------------------------------
-  // SUITE 7: Offline PL/pgSQL Procedural Body Validation
+  // SUITE 8: Offline Procedural Structural and Security Validation
   //
   // Scope:
   // Offline structural, syntax, and security validation of procedural function bodies

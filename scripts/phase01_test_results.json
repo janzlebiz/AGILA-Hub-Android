@@ -487,7 +487,7 @@
     "id": "SYNTAX-PREFLIGHT",
     "name": "Preflight Script Validates Top-Level PostgreSQL AST Syntax",
     "status": "PASS",
-    "evidence": "Parsed 1 top-level DO-block statement via libpg_query (inner PL/pgSQL verified in Suite 7)"
+    "evidence": "Parsed 1 top-level DO-block statement via libpg_query (inner PL/pgSQL verified in Suite 8)"
   },
   {
     "suite": "Procedural Body Validation",

@@ -131,12 +131,12 @@
 
 ---
 
-### 6. Top-Level SQL AST Syntax & Offline Procedural Body Validation Scope
+### 6. Top-Level SQL AST Syntax & Offline Procedural Structural and Security Validation Scope
 *   **Defect & Impact:** Previous claims implied that generic SQL AST parsers validate entire migrations end-to-end, omitting the critical technical distinction that `libpg_query` parses top-level SQL DDL/DML into an AST while treating PL/pgSQL function bodies and DO blocks inside dollar-quotes (`$$`) as opaque string literals.
-*   **Source Location:** `scripts/verify_phase01.ts` (Suites 6 and 7) and `supabase/migrations/` (14 functions, 9 DO blocks)
+*   **Source Location:** `scripts/verify_phase01.ts` (Suites 7 and 8) and `supabase/migrations/` (14 functions, 9 DO blocks)
 *   **Corrected Scope & Implementation:**
-    - **Top-Level SQL AST Scope (Suite 6):** `libpg_query` (via `pgsql-parser`) parses all top-level SQL statements across all 9 migrations and `preflight_schema_check.sql` (182 total statements). Verifies DDL grammar for `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, `CREATE POLICY`, `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, and function signatures without connecting to a live cloud instance.
-    - **Offline Procedural Body Validation (Suite 7):** A dedicated procedural validator extracts each function and DO block body from the migrations and preflight check:
+    - **Top-Level SQL AST Scope (Suite 7):** `libpg_query` (via `pgsql-parser`) parses all top-level SQL statements across all 9 migrations and `preflight_schema_check.sql` (182 total statements). Verifies DDL grammar for `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, `CREATE POLICY`, `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, and function signatures without connecting to a live cloud instance.
+    - **Offline Procedural Structural and Security Validation (Suite 8):** Dedicated offline structural and security checks extract each function and DO block body from the migrations and preflight check:
       - `PROC-BLOCK-BALANCE`: Asserts delimiter matching, balanced `BEGIN`/`END;` blocks, `IF`/`END IF;` conditional structures, and `LOOP`/`END LOOP;` loops across all 14 functions (13 PL/pgSQL, 1 SQL) and 9 DO blocks as offline structural linting checks (NOT compilation) (PASS).
       - `PROC-SECURITY-SEARCHPATH`: Asserts that all 14 `SECURITY DEFINER` functions explicitly lock down `SET search_path = pg_catalog, public` to completely eliminate search_path escalation vulnerabilities, failing on missing, different, or unsafe values (PASS).
       - `PROC-NEG-SEARCHPATH`: Negative test verifying validator strictly rejects missing search_path, single-schema public, user-controlled mutable "$user", and unapproved extensions additions (PASS).
@@ -158,5 +158,5 @@
 | **Preflight Script Parity** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (SQL contract analysis including `constitution_versions` & shared loop parity) |
 | **Restore Runbook Negative Fixtures** | 9 | 9 | 0 | `scripts/verify_phase01.ts` (`env -i` isolated subshell execution) |
 | **Top-Level SQL AST Validation** | 10 | 10 | 0 | `scripts/verify_phase01.ts` (PostgreSQL `libpg_query` AST parser) |
-| **Offline Procedural Body Validation** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (structural balance, approved search_path, representative queries, negative fixtures) |
-| **TOTAL** | **76** | **76** | **0** | **100% Pass Rate** |
+| **Offline Procedural Structural & Security Validation** | 6 | 6 | 0 | `scripts/verify_phase01.ts` (structural balance, approved search_path, representative queries, negative fixtures) |
+| **TOTAL** | **76** | **76** | **0** | **100% Pass Rate across 8 Test Suites** |
