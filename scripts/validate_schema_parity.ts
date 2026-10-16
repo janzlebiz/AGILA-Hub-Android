@@ -41,6 +41,10 @@ export const EXPECTED_CORE_TABLES = [
   'audit_logs'
 ];
 
+export const ALLOWED_VIEWS = [
+  'member_directory_view'
+];
+
 export async function validateSchemaParity(migrationsDir: string = 'supabase/migrations'): Promise<SchemaValidationResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -136,20 +140,34 @@ export async function validateSchemaParity(migrationsDir: string = 'supabase/mig
           unsupportedConstructsDetected.push(`INHERITED TABLE ${tableName}`);
         }
       } else if (stmt && stmt.CreateTableAsStmt) {
-        isTableCreation = true;
         const createTableAs = stmt.CreateTableAsStmt;
         const rel = createTableAs.into?.rel;
+        const relName = rel?.relname || 'unknown';
+        if (createTableAs.objtype === 'OBJECT_MATVIEW') {
+          errors.push(`[${file}] Materialized view '${relName}' encountered. CREATE MATERIALIZED VIEW cannot satisfy expected core-table requirements.`);
+          unsupportedConstructsDetected.push(`CREATE MATERIALIZED VIEW ${relName}`);
+          continue;
+        }
+        isTableCreation = true;
         if (!rel || !rel.relname) {
           errors.push(`[${file}] Encountered CREATE TABLE AS with missing relation name. Failing closed.`);
           continue;
         }
         tableName = rel.relname;
         schemaName = rel.schemaname || 'public';
-      } else if (stmt && (stmt.CreateForeignTableStmt || stmt.CreateMatViewStmt)) {
-        isTableCreation = true;
-        const nodeType = stmt.CreateForeignTableStmt ? 'CREATE FOREIGN TABLE' : 'CREATE MATERIALIZED VIEW';
-        errors.push(`[${file}] Unsupported table creation form '${nodeType}' encountered. Validator fails closed on uninspected table-creation forms.`);
-        unsupportedConstructsDetected.push(nodeType);
+      } else if (stmt && stmt.ViewStmt) {
+        const viewRel = stmt.ViewStmt.view;
+        const viewName = viewRel?.relname || 'unknown';
+        if (EXPECTED_CORE_TABLES.includes(viewName)) {
+          errors.push(`[${file}] Core table '${viewName}' cannot be declared as a VIEW. Core tables require permanent base tables.`);
+        } else if (!ALLOWED_VIEWS.includes(viewName)) {
+          errors.push(`[${file}] Unauthorized view declaration found: '${viewName}'. Only allowed views (${ALLOWED_VIEWS.join(', ')}) are permitted.`);
+        }
+        continue;
+      } else if (stmt && stmt.CreateForeignTableStmt) {
+        errors.push(`[${file}] Unsupported table creation form 'CREATE FOREIGN TABLE' encountered. Validator fails closed on uninspected table-creation forms.`);
+        unsupportedConstructsDetected.push('CREATE FOREIGN TABLE');
+        continue;
       }
 
       if (isTableCreation && tableName) {
@@ -304,6 +322,34 @@ export async function runSchemaParityNegativeFixtures(): Promise<{ fixtureName: 
     details: `Success: ${res6.success}, Errors: ${res6.errors.join(' | ')}`
   });
   cleanupTestDir(testDir6);
+
+  // Fixture 7: Materialized View substitution cannot satisfy core table requirement
+  const testDir7 = 'supabase/migrations_neg_test_matview';
+  setupTestDir(testDir7);
+  const mvFile = path.join(testDir7, '20261013000015_matview.sql');
+  fs.writeFileSync(mvFile, 'CREATE MATERIALIZED VIEW unauthorized_mv AS SELECT 1 AS id;');
+  const res7 = await validateSchemaParity(testDir7);
+  const f7Passed = !res7.success && res7.errors.some(e => e.includes('CREATE MATERIALIZED VIEW cannot satisfy expected core-table requirements'));
+  fixtureResults.push({
+    fixtureName: 'Materialized View Substitution Rejected',
+    passed: f7Passed,
+    details: `Success: ${res7.success}, Errors: ${res7.errors.join(' | ')}`
+  });
+  cleanupTestDir(testDir7);
+
+  // Fixture 8: Unauthorized View rejected
+  const testDir8 = 'supabase/migrations_neg_test_view';
+  setupTestDir(testDir8);
+  const viewFile = path.join(testDir8, '20261013000016_view.sql');
+  fs.writeFileSync(viewFile, 'CREATE VIEW unauthorized_view AS SELECT 1;');
+  const res8 = await validateSchemaParity(testDir8);
+  const f8Passed = !res8.success && res8.errors.some(e => e.includes('Unauthorized view declaration found: \'unauthorized_view\''));
+  fixtureResults.push({
+    fixtureName: 'Unauthorized View Rejected',
+    passed: f8Passed,
+    details: `Success: ${res8.success}, Errors: ${res8.errors.join(' | ')}`
+  });
+  cleanupTestDir(testDir8);
 
   return fixtureResults;
 }

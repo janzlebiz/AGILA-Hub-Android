@@ -78,22 +78,43 @@ if [ -n "$OVERLAPPING_IPS" ]; then
     exit 1
 fi
 
-# 3. Validate Explicit Single Backup File & Checksum
+# 3. Validate Explicit Single Backup File & Checksum Sidecar
 BACKUP_FILE="${1:-./backups/backup_staging_test.sql}"
 if [ ! -s "$BACKUP_FILE" ]; then
     echo "FATAL: Backup file '$BACKUP_FILE' does not exist or is empty." >&2
     exit 1
 fi
 
-if [ ! -f "${BACKUP_FILE}.sha256" ]; then
-    echo "FATAL: Checksum file '${BACKUP_FILE}.sha256' is missing." >&2
+CHECKSUM_FILE="${BACKUP_FILE}.sha256"
+if [ ! -s "$CHECKSUM_FILE" ]; then
+    echo "FATAL: Checksum file '$CHECKSUM_FILE' is missing or empty." >&2
     exit 1
 fi
 
-sha256sum -c "${BACKUP_FILE}.sha256" || {
-    echo "FATAL: Checksum validation failed for '$BACKUP_FILE'." >&2
+# Reject multi-entry checksum sidecars (must have exactly 1 non-empty line)
+NON_EMPTY_LINES=$(grep -v '^[[:space:]]*$' "$CHECKSUM_FILE" | wc -l)
+if [ "$NON_EMPTY_LINES" -ne 1 ]; then
+    echo "FATAL: Checksum file '$CHECKSUM_FILE' contains $NON_EMPTY_LINES entries (expected exactly 1). Multi-entry sidecars are rejected." >&2
     exit 1
-}
+fi
+
+# Read expected hash and referenced filename
+READ_HASH=$(awk '{print $1}' "$CHECKSUM_FILE")
+READ_FILENAME=$(awk '{print $2}' "$CHECKSUM_FILE" | sed 's/^[ *]//')
+EXPECTED_BASENAME=$(basename "$BACKUP_FILE")
+
+# Reject mismatched filename in checksum sidecar
+if [ "$READ_FILENAME" != "$EXPECTED_BASENAME" ]; then
+    echo "FATAL: Checksum file filename mismatch! Referenced file '$READ_FILENAME' does not match target backup '$EXPECTED_BASENAME'." >&2
+    exit 1
+fi
+
+# Verify checksum against actual backup file (reject incorrect hash / tampered backup / substitution)
+COMPUTED_HASH=$(sha256sum "$BACKUP_FILE" | awk '{print $1}')
+if [ "$READ_HASH" != "$COMPUTED_HASH" ]; then
+    echo "FATAL: Checksum validation failed for '$BACKUP_FILE' (hash mismatch: expected '$READ_HASH', computed '$COMPUTED_HASH')." >&2
+    exit 1
+fi
 
 # 4. Transaction-Safe Data Restore with Fail-Fast Execution
 echo "Starting transaction-safe restore into target: $TARGET_PROJECT_ID ($TARGET_HOST) in environment: $TARGET_ENV..."
