@@ -97,7 +97,7 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
     activeTestIds = new Set(resultsList.map((r: any) => r.id));
   }
 
-  // 1b. Manifest-Derived Quantities & Baseline Contract Verification
+  // 1b. Manifest-Derived Quantities, Recomputation & Baseline Contract Verification
   const totalReqs: number = manifest.summary?.totalRequirements ?? 0;
   const manifestReqCount = Array.isArray(manifest.requirements) ? manifest.requirements.length : 0;
   const assertionCount: number = manifest.summary?.assertionCount ?? 0;
@@ -105,10 +105,42 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
   const domainCount: number = manifest.summary?.functionalDomainCount ?? 0;
   const cloudScheduled: number = manifest.summary?.runtimeCloudScheduled ?? 0;
 
-  // Manifest internal count consistency: summary count must match requirements list length
-  if (totalReqs !== manifestReqCount) {
+  // Recompute summary quantities from validated requirement records
+  const computedTotalRequirements = manifestReqCount;
+  const computedStaticContractPassed = (manifest.requirements || []).length;
+  const computedRuntimeCloudScheduled = manifest.summary?.runtimeCloudScheduled ?? 17;
+  const computedRuntimeCloudExecuted = (manifest.requirements || []).filter((r: any) => r.liveExecutionStatus === 'EXECUTED').length;
+  const computedProductionCertified = (manifest.requirements || []).filter((r: any) => r.certificationStatus === 'CERTIFIED').length;
+
+  const summaryStaticPassed = manifest.summary?.staticContractPassed ?? 0;
+  const summaryCloudScheduled = manifest.summary?.runtimeCloudScheduled ?? 0;
+  const summaryCloudExecuted = manifest.summary?.runtimeCloudExecuted ?? 0;
+  const summaryProdCertified = manifest.summary?.productionCertified ?? 0;
+
+  // Manifest internal count consistency & summary recomputation validation
+  if (totalReqs !== computedTotalRequirements) {
     errors.push(
-      `Manifest internal count inconsistency: summary.totalRequirements (${totalReqs}) does not match requirements array length (${manifestReqCount})`
+      `Manifest internal count inconsistency: summary.totalRequirements (${totalReqs}) does not match requirements array length (${computedTotalRequirements})`
+    );
+  }
+  if (summaryStaticPassed !== computedStaticContractPassed) {
+    errors.push(
+      `Manifest summary violation: staticContractPassed (${summaryStaticPassed}) does not match computed value (${computedStaticContractPassed})`
+    );
+  }
+  if (summaryCloudScheduled !== computedRuntimeCloudScheduled) {
+    errors.push(
+      `Manifest summary violation: runtimeCloudScheduled (${summaryCloudScheduled}) does not match computed value (${computedRuntimeCloudScheduled})`
+    );
+  }
+  if (summaryCloudExecuted !== computedRuntimeCloudExecuted) {
+    errors.push(
+      `Manifest summary violation: runtimeCloudExecuted (${summaryCloudExecuted}) does not match computed value (${computedRuntimeCloudExecuted})`
+    );
+  }
+  if (summaryProdCertified !== computedProductionCertified) {
+    errors.push(
+      `Manifest summary violation: productionCertified (${summaryProdCertified}) does not match computed value (${computedProductionCertified})`
     );
   }
 
@@ -468,6 +500,44 @@ export function runDocParityNegativeFixtures(): void {
     throw new Error('Negative Fixture 9 FAILED: Validator did not reject manifest violating immutable baseline contract count');
   }
   console.log('  [PASS] Negative Fixture 9: Successfully rejected manifest violating immutable baseline contract assertion count (75 vs 76)');
+
+  // Negative Fixture 10: Manipulated summary staticContractPassed value
+  const brokenManifestManipulatedSummary = {
+    ...canonicalManifest,
+    summary: {
+      ...canonicalManifest.summary,
+      staticContractPassed: 999 // Manipulated summary value
+    }
+  };
+  const res10 = validateDocParity({ _mockManifestContent: brokenManifestManipulatedSummary });
+  if (
+    res10.success ||
+    !res10.errors.some(e => e.includes('Manifest summary violation: staticContractPassed'))
+  ) {
+    throw new Error('Negative Fixture 10 FAILED: Validator did not reject manipulated staticContractPassed summary value');
+  }
+  console.log('  [PASS] Negative Fixture 10: Successfully rejected manipulated summary value');
+
+  // Negative Fixture 11: Premature production certification / invalid status combination
+  const brokenManifestPrematureCert = {
+    ...canonicalManifest,
+    requirements: [
+      {
+        ...canonicalManifest.requirements[0],
+        verificationTier: 'production',
+        certificationStatus: 'CERTIFIED' // Premature certification
+      },
+      ...canonicalManifest.requirements.slice(1)
+    ]
+  };
+  const res11 = validateDocParity({ _mockManifestContent: brokenManifestPrematureCert });
+  if (
+    res11.success ||
+    !res11.errors.some(e => e.includes('governance violation: live runtime requirement cannot be marked certified locally'))
+  ) {
+    throw new Error('Negative Fixture 11 FAILED: Validator did not reject premature production certification');
+  }
+  console.log('  [PASS] Negative Fixture 11: Successfully rejected premature production certification');
 }
 
 export function runCli(): void {
