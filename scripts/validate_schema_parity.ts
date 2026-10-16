@@ -48,6 +48,7 @@ export async function validateSchemaParity(migrationsDir: string = 'supabase/mig
   const requiredMigrationsVerified: string[] = [];
   const tablesFoundSet = new Set<string>();
   const unsupportedConstructsDetected: string[] = [];
+  const tableDeclarations = new Map<string, string>(); // tableName -> file where declared
 
   if (!fs.existsSync(migrationsDir)) {
     return {
@@ -101,31 +102,30 @@ export async function validateSchemaParity(migrationsDir: string = 'supabase/mig
     }
 
     for (const stmtObj of stmts) {
-      // pgsql-parser statement wrapper
       const stmt = stmtObj.stmt || stmtObj;
 
-      // Check for CreateStmt (CREATE TABLE)
+      let tableName: string | null = null;
+      let schemaName: string = 'public';
+      let isTableCreation = false;
+
       if (stmt && stmt.CreateStmt) {
+        isTableCreation = true;
         const createStmt = stmt.CreateStmt;
         const relation = createStmt.relation;
-        
         if (!relation || !relation.relname) {
           errors.push(`[${file}] Encountered CREATE TABLE with missing relation name. Failing closed.`);
           continue;
         }
-
-        const tableName = relation.relname;
-        const schemaName = relation.schemaname || 'public';
+        tableName = relation.relname;
+        schemaName = relation.schemaname || 'public';
 
         // Check unsupported table persistence or constructs
-        // relpersistence: 'p' = permanent, 't' = temporary, 'u' = unlogged
         if (createStmt.relpersistence && createStmt.relpersistence !== 'p') {
           const pType = createStmt.relpersistence === 't' ? 'TEMPORARY' : 'UNLOGGED';
           errors.push(`[${file}] Unsupported table persistence '${pType}' for table '${tableName}'. Only permanent tables are allowed.`);
           unsupportedConstructsDetected.push(`${pType} TABLE ${tableName}`);
         }
 
-        // Check if partitioned or inherited
         if (createStmt.partspec) {
           errors.push(`[${file}] Partitioned table creation detected for '${tableName}'. Table partitioning is not supported by core validator.`);
           unsupportedConstructsDetected.push(`PARTITIONED TABLE ${tableName}`);
@@ -134,6 +134,36 @@ export async function validateSchemaParity(migrationsDir: string = 'supabase/mig
         if (createStmt.inhRelations && createStmt.inhRelations.length > 0) {
           errors.push(`[${file}] Table inheritance detected for '${tableName}'. Inheritance is not supported.`);
           unsupportedConstructsDetected.push(`INHERITED TABLE ${tableName}`);
+        }
+      } else if (stmt && stmt.CreateTableAsStmt) {
+        isTableCreation = true;
+        const createTableAs = stmt.CreateTableAsStmt;
+        const rel = createTableAs.into?.rel;
+        if (!rel || !rel.relname) {
+          errors.push(`[${file}] Encountered CREATE TABLE AS with missing relation name. Failing closed.`);
+          continue;
+        }
+        tableName = rel.relname;
+        schemaName = rel.schemaname || 'public';
+      } else if (stmt && (stmt.CreateForeignTableStmt || stmt.CreateMatViewStmt)) {
+        isTableCreation = true;
+        const nodeType = stmt.CreateForeignTableStmt ? 'CREATE FOREIGN TABLE' : 'CREATE MATERIALIZED VIEW';
+        errors.push(`[${file}] Unsupported table creation form '${nodeType}' encountered. Validator fails closed on uninspected table-creation forms.`);
+        unsupportedConstructsDetected.push(nodeType);
+      }
+
+      if (isTableCreation && tableName) {
+        // Enforce all core tables are declared in public schema
+        if (EXPECTED_CORE_TABLES.includes(tableName) && schemaName !== 'public') {
+          errors.push(`[${file}] Core table '${tableName}' is declared in schema '${schemaName}', but all core tables must be declared in the public schema.`);
+        }
+
+        // Track duplicate table declarations across migrations
+        if (tableDeclarations.has(tableName)) {
+          const existingFile = tableDeclarations.get(tableName);
+          errors.push(`[${file}] Duplicate table declaration found for '${tableName}' (previously declared in '${existingFile}').`);
+        } else {
+          tableDeclarations.set(tableName, file);
         }
 
         // Validate table inventory whitelist
@@ -144,9 +174,7 @@ export async function validateSchemaParity(migrationsDir: string = 'supabase/mig
         }
       }
 
-      // Track other statement types or explicit unsupported DDL if any
       if (stmt && stmt.DropStmt) {
-        // e.g. DROP TABLE or DROP POLICY
         warnings.push(`[${file}] DROP statement detected.`);
       }
     }
@@ -179,80 +207,103 @@ export async function validateSchemaParity(migrationsDir: string = 'supabase/mig
 export async function runSchemaParityNegativeFixtures(): Promise<{ fixtureName: string; passed: boolean; details: string }[]> {
   const fixtureResults: { fixtureName: string; passed: boolean; details: string }[] = [];
 
+  const setupTestDir = (dirName: string) => {
+    if (!fs.existsSync(dirName)) {
+      fs.mkdirSync(dirName, { recursive: true });
+    }
+    for (const m of REQUIRED_MIGRATIONS) {
+      const src = path.join('supabase/migrations', m);
+      const dest = path.join(dirName, m);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest);
+      }
+    }
+  };
+
+  const cleanupTestDir = (dirName: string) => {
+    try {
+      const files = fs.readdirSync(dirName);
+      for (const f of files) {
+        fs.unlinkSync(path.join(dirName, f));
+      }
+      fs.rmdirSync(dirName);
+    } catch (e) {}
+  };
+
   // Fixture 1: Missing required migration
   const res1 = await validateSchemaParity('supabase/migrations_nonexistent_test');
   const f1Passed = !res1.success && res1.errors.some(e => e.includes('Migrations directory not found'));
   fixtureResults.push({ fixtureName: 'Missing Migrations Directory', passed: f1Passed, details: `Success: ${res1.success}, Errors: ${res1.errors.join('; ')}` });
 
   // Fixture 2: Unauthorized table in additional migration (using quoted identifiers and alternate formatting)
-  const testDir = 'supabase/migrations_neg_test';
-  if (!fs.existsSync(testDir)) {
-    fs.mkdirSync(testDir, { recursive: true });
-  }
-  // Copy baseline migrations over
-  for (const m of REQUIRED_MIGRATIONS) {
-    const src = path.join('supabase/migrations', m);
-    const dest = path.join(testDir, m);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-    }
-  }
-  // Add malicious migration with quoted unauthorized table & unsupported TEMPORARY table
-  const maliciousFile = path.join(testDir, '20261013000010_unauthorized_backdoor.sql');
-  fs.writeFileSync(maliciousFile, 'CREATE TEMPORARY TABLE "public"."unauthorized_backdoor" (id UUID PRIMARY KEY);');
-
-  const res2 = await validateSchemaParity(testDir);
-  const f2Passed = !res2.success && 
-    res2.errors.some(e => e.includes("Unauthorized table declaration found: 'unauthorized_backdoor'"));
-  
+  const testDir2 = 'supabase/migrations_neg_test_unauth';
+  setupTestDir(testDir2);
+  const maliciousFile2 = path.join(testDir2, '20261013000010_unauthorized_backdoor.sql');
+  fs.writeFileSync(maliciousFile2, 'CREATE TEMPORARY TABLE "public"."unauthorized_backdoor" (id UUID PRIMARY KEY);');
+  const res2 = await validateSchemaParity(testDir2);
+  const f2Passed = !res2.success && res2.errors.some(e => e.includes("Unauthorized table declaration found: 'unauthorized_backdoor'"));
   fixtureResults.push({ 
     fixtureName: 'Unauthorized Quoted Table & Unsupported TEMPORARY Table', 
     passed: f2Passed, 
     details: `Success: ${res2.success}, Errors found: ${res2.errors.length} -> ${res2.errors.join(' | ')}` 
   });
-
-  // Clean up negative test directory
-  try {
-    const files = fs.readdirSync(testDir);
-    for (const f of files) {
-      fs.unlinkSync(path.join(testDir, f));
-    }
-    fs.rmdirSync(testDir);
-  } catch (e) {
-    // ignore cleanup err
-  }
+  cleanupTestDir(testDir2);
 
   // Fixture 3: Malformed unparseable SQL (fails closed)
   const testDir3 = 'supabase/migrations_neg_test_malformed';
-  if (!fs.existsSync(testDir3)) {
-    fs.mkdirSync(testDir3, { recursive: true });
-  }
-  for (const m of REQUIRED_MIGRATIONS) {
-    const src = path.join('supabase/migrations', m);
-    const dest = path.join(testDir3, m);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-    }
-  }
+  setupTestDir(testDir3);
   const malformedFile = path.join(testDir3, '20261013000011_malformed.sql');
-  fs.writeFileSync(malformedFile, 'CREATE TABLE public.bad_syntax (id UUID PRIMARY KEY;'); // unclosed paren
-
+  fs.writeFileSync(malformedFile, 'CREATE TABLE public.bad_syntax (id UUID PRIMARY KEY;');
   const res3 = await validateSchemaParity(testDir3);
   const f3Passed = !res3.success && res3.errors.some(e => e.includes('SQL Parse error'));
-  
   fixtureResults.push({
     fixtureName: 'Malformed SQL Parse Error (Fail Closed)',
     passed: f3Passed,
     details: `Success: ${res3.success}, Errors: ${res3.errors.join(' | ')}`
   });
+  cleanupTestDir(testDir3);
 
-  try {
-    const files = fs.readdirSync(testDir3);
-    for (const f of files) {
-      fs.unlinkSync(path.join(testDir3, f));
-    }
-    fs.rmdirSync(testDir3);
-  } catch (e) {}
+  // Fixture 4: Authorized core table declared outside public schema
+  const testDir4 = 'supabase/migrations_neg_test_schema';
+  setupTestDir(testDir4);
+  const schemaFile = path.join(testDir4, '20261013000012_schema_violation.sql');
+  fs.writeFileSync(schemaFile, 'CREATE TABLE other_schema.members (id UUID PRIMARY KEY);');
+  const res4 = await validateSchemaParity(testDir4);
+  const f4Passed = !res4.success && res4.errors.some(e => e.includes("Core table 'members' is declared in schema 'other_schema'"));
+  fixtureResults.push({
+    fixtureName: 'Core Table Declared Outside Public Schema',
+    passed: f4Passed,
+    details: `Success: ${res4.success}, Errors: ${res4.errors.join(' | ')}`
+  });
+  cleanupTestDir(testDir4);
+
+  // Fixture 5: Duplicate core-table declaration across migrations
+  const testDir5 = 'supabase/migrations_neg_test_dup';
+  setupTestDir(testDir5);
+  const dupFile = path.join(testDir5, '20261013000013_duplicate_members.sql');
+  fs.writeFileSync(dupFile, 'CREATE TABLE members (id UUID PRIMARY KEY);');
+  const res5 = await validateSchemaParity(testDir5);
+  const f5Passed = !res5.success && res5.errors.some(e => e.includes("Duplicate table declaration found for 'members'"));
+  fixtureResults.push({
+    fixtureName: 'Duplicate Core-Table Declaration Across Migrations',
+    passed: f5Passed,
+    details: `Success: ${res5.success}, Errors: ${res5.errors.join(' | ')}`
+  });
+  cleanupTestDir(testDir5);
+
+  // Fixture 6: Unauthorized table created using CREATE TABLE AS
+  const testDir6 = 'supabase/migrations_neg_test_cta';
+  setupTestDir(testDir6);
+  const ctaFile = path.join(testDir6, '20261013000014_create_table_as.sql');
+  fs.writeFileSync(ctaFile, 'CREATE TABLE unauthorized_cat AS SELECT 1 AS id;');
+  const res6 = await validateSchemaParity(testDir6);
+  const f6Passed = !res6.success && res6.errors.some(e => e.includes("Unauthorized table declaration found: 'unauthorized_cat'"));
+  fixtureResults.push({
+    fixtureName: 'Unauthorized Table Created Using CREATE TABLE AS',
+    passed: f6Passed,
+    details: `Success: ${res6.success}, Errors: ${res6.errors.join(' | ')}`
+  });
+  cleanupTestDir(testDir6);
 
   return fixtureResults;
 }
