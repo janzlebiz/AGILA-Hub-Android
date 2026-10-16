@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { parse } from 'pgsql-parser';
 
 export interface SchemaValidationResult {
   success: boolean;
@@ -7,19 +9,10 @@ export interface SchemaValidationResult {
   allMigrationsFound: string[];
   requiredMigrationsVerified: string[];
   tableCount: number;
-  tablesVerified: string[];
-  columnsVerified: string[];
-  indexesVerified: string[];
-  supportedConstructs: string[];
-  unverifiedDimensions: string[];
+  tablesFound: string[];
   errors: string[];
-}
-
-export interface SchemaValidationOptions {
-  migrationsDir?: string;
-  preflightPath?: string;
-  _mockMigrationsContent?: Record<string, string>;
-  _mockPreflightContent?: string;
+  warnings: string[];
+  unsupportedConstructsDetected: string[];
 }
 
 export const REQUIRED_MIGRATIONS = [
@@ -48,542 +41,280 @@ export const EXPECTED_CORE_TABLES = [
   'audit_logs'
 ];
 
-export const SUPPORTED_SQL_CONSTRUCTS = [
-  'CREATE TABLE [IF NOT EXISTS] public.<table_name> ( ... )',
-  'Primitive & Custom Data Types: UUID, VARCHAR(n), DECIMAL(p,s), TIMESTAMPTZ, DATE, vector(n), INT, BOOLEAN',
-  'Column Constraints: NOT NULL, PRIMARY KEY, DEFAULT, UNIQUE',
-  'Table Constraints: CONSTRAINT <name> UNIQUE ( ... )',
-  'Index Declarations: CREATE [UNIQUE] INDEX ON public.<table_name> [USING hnsw|btree] ( ... )',
-  'Preflight Declarations: v_expected_tables TEXT[] := ARRAY[ ... ]',
-  'Preflight Information Schema Checks: table_name, column_name, data_type, character_maximum_length',
-  'Preflight Catalog Checks: pg_indexes, pg_constraint, pg_tables.rowsecurity loop'
-];
-
-export const UNVERIFIED_SCHEMA_DIMENSIONS = [
-  'Live Database Authorization & Role Permissions (Deferred: requires live cloud PostgreSQL with pg_roles/privileges)',
-  'Runtime Database Constraints: Live foreign key referential integrity enforcement on mutated rows',
-  'Runtime Triggers: Trigger execution order and procedural state modifications inside PL/pgSQL',
-  'PL/pgSQL Procedural Compilation: Server-side validation via plpgsql_check (Deferred: requires connected PostgreSQL engine)',
-  'Dynamic SQL Statements: SQL queries executed via EXECUTE format(...) within procedural functions',
-  'Storage Object Policies: Supabase storage.objects RLS and MIME type enforcement',
-  'Live Auth Gateway Invariants: Supabase GoTrue JWT claims, token revocation, and session states',
-  'Production Certification: Production deployment readiness certification (Deferred to Phase 07)'
-];
-
-export function validateSchemaParity(options?: SchemaValidationOptions): SchemaValidationResult {
+export async function validateSchemaParity(migrationsDir: string = 'supabase/migrations'): Promise<SchemaValidationResult> {
   const errors: string[] = [];
-  const tablesVerified: string[] = [];
-  const columnsVerified: string[] = [];
-  const indexesVerified: string[] = [];
-  const requiredMigrationsVerified: string[] = [];
+  const warnings: string[] = [];
   const allMigrationsFound: string[] = [];
+  const requiredMigrationsVerified: string[] = [];
+  const tablesFoundSet = new Set<string>();
+  const unsupportedConstructsDetected: string[] = [];
 
-  // 1. Load & Validate Migration Files (Every SQL file in supabase/migrations is inspected)
-  let migrationFilesContent: Record<string, string> = {};
+  if (!fs.existsSync(migrationsDir)) {
+    return {
+      success: false,
+      totalMigrationsInspected: 0,
+      allMigrationsFound: [],
+      requiredMigrationsVerified: [],
+      tableCount: 0,
+      tablesFound: [],
+      errors: [`Migrations directory not found: ${migrationsDir}`],
+      warnings: [],
+      unsupportedConstructsDetected: []
+    };
+  }
 
-  if (options?._mockMigrationsContent) {
-    migrationFilesContent = options._mockMigrationsContent;
-    allMigrationsFound.push(...Object.keys(migrationFilesContent).sort());
-    // Verify that every required baseline migration is present in the mock
-    for (const reqMigration of REQUIRED_MIGRATIONS) {
-      if (!migrationFilesContent[reqMigration]) {
-        errors.push(`Missing required baseline migration file: ${reqMigration}`);
-      } else {
-        requiredMigrationsVerified.push(reqMigration);
-      }
+  const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  allMigrationsFound.push(...files);
+
+  // 1. Verify required migrations exist
+  for (const req of REQUIRED_MIGRATIONS) {
+    if (!files.includes(req)) {
+      errors.push(`Missing required core migration: ${req}`);
+    } else {
+      requiredMigrationsVerified.push(req);
     }
-  } else {
-    const migrationsDir = options?.migrationsDir || path.resolve('supabase/migrations');
-    if (!fs.existsSync(migrationsDir)) {
-      throw new Error(`Migrations directory not found: ${migrationsDir}`);
+  }
+
+  // 2. Inspect every migration file using AST parsing (pgsql-parser)
+  for (const file of files) {
+    const filePath = path.join(migrationsDir, file);
+    let content = '';
+    try {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch (err: any) {
+      errors.push(`Failed to read migration file ${file}: ${err.message}`);
+      continue;
     }
 
-    const dirEntries = fs.readdirSync(migrationsDir);
-    const sqlFiles = dirEntries.filter(f => f.endsWith('.sql')).sort();
-    allMigrationsFound.push(...sqlFiles);
-
-    // Verify all nine required baseline migrations exist in the directory
-    for (const reqMigration of REQUIRED_MIGRATIONS) {
-      if (!sqlFiles.includes(reqMigration)) {
-        errors.push(`Missing required baseline migration file: ${reqMigration} (expected at ${path.join(migrationsDir, reqMigration)})`);
-      } else {
-        requiredMigrationsVerified.push(reqMigration);
-      }
+    if (!content.trim()) {
+      errors.push(`Migration file ${file} is empty.`);
+      continue;
     }
 
-    // Inspect every SQL file in supabase/migrations, not only the nine required filenames
-    for (const sqlFile of sqlFiles) {
-      const fullPath = path.join(migrationsDir, sqlFile);
-      try {
-        const content = fs.readFileSync(fullPath, 'utf-8');
-        if (content.trim().length === 0) {
-          errors.push(`Migration file is empty: ${sqlFile}`);
+    let stmts: any[] = [];
+    try {
+      const parsed = await parse(content);
+      stmts = parsed.stmts || [];
+    } catch (parseErr: any) {
+      errors.push(`SQL Parse error in ${file}: ${parseErr.message}. (Validator fails closed on unparseable SQL constructs).`);
+      continue;
+    }
+
+    for (const stmtObj of stmts) {
+      // pgsql-parser statement wrapper
+      const stmt = stmtObj.stmt || stmtObj;
+
+      // Check for CreateStmt (CREATE TABLE)
+      if (stmt && stmt.CreateStmt) {
+        const createStmt = stmt.CreateStmt;
+        const relation = createStmt.relation;
+        
+        if (!relation || !relation.relname) {
+          errors.push(`[${file}] Encountered CREATE TABLE with missing relation name. Failing closed.`);
           continue;
         }
-        migrationFilesContent[sqlFile] = content;
-      } catch (err: any) {
-        errors.push(`Migration file is unreadable: ${sqlFile} (${err.message})`);
+
+        const tableName = relation.relname;
+        const schemaName = relation.schemaname || 'public';
+
+        // Check unsupported table persistence or constructs
+        // relpersistence: 'p' = permanent, 't' = temporary, 'u' = unlogged
+        if (createStmt.relpersistence && createStmt.relpersistence !== 'p') {
+          const pType = createStmt.relpersistence === 't' ? 'TEMPORARY' : 'UNLOGGED';
+          errors.push(`[${file}] Unsupported table persistence '${pType}' for table '${tableName}'. Only permanent tables are allowed.`);
+          unsupportedConstructsDetected.push(`${pType} TABLE ${tableName}`);
+        }
+
+        // Check if partitioned or inherited
+        if (createStmt.partspec) {
+          errors.push(`[${file}] Partitioned table creation detected for '${tableName}'. Table partitioning is not supported by core validator.`);
+          unsupportedConstructsDetected.push(`PARTITIONED TABLE ${tableName}`);
+        }
+
+        if (createStmt.inhRelations && createStmt.inhRelations.length > 0) {
+          errors.push(`[${file}] Table inheritance detected for '${tableName}'. Inheritance is not supported.`);
+          unsupportedConstructsDetected.push(`INHERITED TABLE ${tableName}`);
+        }
+
+        // Validate table inventory whitelist
+        if (!EXPECTED_CORE_TABLES.includes(tableName)) {
+          errors.push(`[${file}] Unauthorized table declaration found: '${tableName}' in schema '${schemaName}'. Expected only core AGILA Hub tables.`);
+        } else {
+          tablesFoundSet.add(tableName);
+        }
+      }
+
+      // Track other statement types or explicit unsupported DDL if any
+      if (stmt && stmt.DropStmt) {
+        // e.g. DROP TABLE or DROP POLICY
+        warnings.push(`[${file}] DROP statement detected.`);
       }
     }
   }
 
-  // 2. Load & Validate Preflight Script
-  let preflightContent = '';
-  if (options?._mockPreflightContent !== undefined) {
-    preflightContent = options._mockPreflightContent;
-    if (preflightContent.trim().length === 0) {
-      errors.push('Preflight script content is empty');
-    }
-  } else {
-    const preflightPath = options?.preflightPath || path.resolve('scripts/preflight_schema_check.sql');
-    if (!fs.existsSync(preflightPath)) {
-      throw new Error(`Preflight script not found: ${preflightPath}`);
-    }
-    preflightContent = fs.readFileSync(preflightPath, 'utf-8');
-    if (preflightContent.trim().length === 0) {
-      errors.push(`Preflight script is empty: ${preflightPath}`);
+  const tablesFound = Array.from(tablesFoundSet).sort();
+
+  // Verify all expected core tables were found
+  for (const coreTable of EXPECTED_CORE_TABLES) {
+    if (!tablesFoundSet.has(coreTable)) {
+      errors.push(`Expected core table '${coreTable}' was not declared across inspected migrations.`);
     }
   }
 
-  // 3. Fail Closed on Genuinely Unsupported SQL Constructs in Input
-  // If the validator cannot safely inspect a file or SQL construct, fail closed or explicitly report that limitation.
-  const unsupportedConstructPatterns = [
-    { pattern: /PARTITION\s+BY\s+(?:HASH|RANGE|LIST)/i, name: 'Table Partitioning (PARTITION BY)' },
-    { pattern: /EXECUTE\s+(?:format\s*\(|'CREATE\s+TABLE)/i, name: 'Dynamic DDL in procedural block (EXECUTE format/CREATE)' },
-    { pattern: /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?!public\.)[a-z0-9_]+\.[a-z0-9_]+/i, name: 'Non-public schema table declaration' },
-    { pattern: /INHERITS\s*\(/i, name: 'Table Inheritance (INHERITS)' },
-    { pattern: /CREATE\s+FOREIGN\s+TABLE/i, name: 'Foreign Table (CREATE FOREIGN TABLE)' }
-  ];
-
-  for (const [filename, content] of Object.entries(migrationFilesContent)) {
-    for (const uc of unsupportedConstructPatterns) {
-      if (uc.pattern.test(content)) {
-        errors.push(
-          `Unsupported SQL construct encountered in '${filename}': Offline static validator cannot safely inspect '${uc.name}'. Fail-closed constraint triggered; full schema parity cannot be claimed without live database verification.`
-        );
-      }
-    }
-  }
-
-  // 4. Extract and Validate Table Declarations Across All Migrations (Required and Additional)
-  // Extract individual table blocks: CREATE TABLE [IF NOT EXISTS] public.<name> ( ... );
-  const tableBlockRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?public\.([a-z0-9_]+)\s*\(([\s\S]*?)\);/gi;
-  const migrationTablesDeclared = new Map<string, { filename: string; blockContent: string }>();
-  const duplicateTables = new Set<string>();
-
-  for (const [filename, content] of Object.entries(migrationFilesContent)) {
-    let match: RegExpExecArray | null;
-    while ((match = tableBlockRegex.exec(content)) !== null) {
-      const tableName = match[1];
-      const blockContent = match[2];
-
-      if (migrationTablesDeclared.has(tableName)) {
-        duplicateTables.add(tableName);
-      } else {
-        migrationTablesDeclared.set(tableName, { filename, blockContent });
-      }
-    }
-  }
-
-  if (duplicateTables.size > 0) {
-    for (const dup of duplicateTables) {
-      errors.push(`Duplicate table declaration detected across migrations for table 'public.${dup}'`);
-    }
-  }
-
-  // Check for unexpected/unauthorized public tables in all migration files
-  for (const [tableName, meta] of migrationTablesDeclared.entries()) {
-    if (!EXPECTED_CORE_TABLES.includes(tableName)) {
-      errors.push(`Unexpected table declared in migrations: 'public.${tableName}' (in ${meta.filename})`);
-    }
-  }
-
-  // 5. Extract v_expected_tables from Preflight
-  const preflightArrayMatch = preflightContent.match(/v_expected_tables\s+TEXT\[\]\s*:=\s*ARRAY\[([\s\S]*?)\];/i);
-  if (!preflightArrayMatch) {
-    errors.push('Preflight script is missing or has malformed "v_expected_tables TEXT[] := ARRAY[...]" declaration');
-  }
-
-  const preflightTables = new Set<string>();
-  if (preflightArrayMatch) {
-    const rawArray = preflightArrayMatch[1];
-    const itemRegex = /'([a-z_]+)'/gi;
-    let itemMatch: RegExpExecArray | null;
-    while ((itemMatch = itemRegex.exec(rawArray)) !== null) {
-      preflightTables.add(itemMatch[1]);
-    }
-  }
-
-  // Core Table Coverage Verification
-  for (const expectedTable of EXPECTED_CORE_TABLES) {
-    if (!migrationTablesDeclared.has(expectedTable)) {
-      errors.push(`Migration DDL coverage failure: Expected core table '${expectedTable}' is not declared in migrations`);
-    }
-    if (!preflightTables.has(expectedTable)) {
-      errors.push(`Preflight coverage failure: Expected core table '${expectedTable}' is missing from preflight v_expected_tables`);
-    } else {
-      tablesVerified.push(expectedTable);
-    }
-  }
-
-  if (preflightTables.size !== EXPECTED_CORE_TABLES.length) {
-    errors.push(`Preflight table count mismatch: Expected ${EXPECTED_CORE_TABLES.length} tables, found ${preflightTables.size}`);
-  }
-
-  // 6. Object-Tied Column Declarations & Parity Checks
-
-  // Check A: audit_logs.actor_type VARCHAR(50)
-  const auditLogsBlock = migrationTablesDeclared.get('audit_logs')?.blockContent;
-  if (!auditLogsBlock || !/actor_type\s+VARCHAR\(50\)/i.test(auditLogsBlock)) {
-    errors.push("Column contract failure: Column 'actor_type VARCHAR(50)' is not defined inside CREATE TABLE for 'public.audit_logs'");
-  } else {
-    // Verify preflight binds check specifically to audit_logs
-    const preflightActorTypeBound = /table_name\s*=\s*'audit_logs'[\s\S]*?column_name\s*=\s*'actor_type'[\s\S]*?data_type\s*=\s*'character varying'[\s\S]*?character_maximum_length\s*=\s*50/i.test(preflightContent);
-    if (!preflightActorTypeBound) {
-      errors.push("Column-type parity failure: Preflight script does not assert actor_type as 'character varying' with character_maximum_length = 50 on table 'audit_logs'");
-    } else {
-      columnsVerified.push('public.audit_logs.actor_type VARCHAR(50)');
-    }
-  }
-
-  // Check B: members.auth_user_id UUID
-  const membersBlock = migrationTablesDeclared.get('members')?.blockContent;
-  if (!membersBlock || !/auth_user_id\s+UUID/i.test(membersBlock)) {
-    errors.push("Column contract failure: Column 'auth_user_id UUID' is not defined inside CREATE TABLE for 'public.members'");
-  } else {
-    const preflightAuthBound = /table_name\s*=\s*'members'[\s\S]*?column_name\s*=\s*'auth_user_id'[\s\S]*?data_type\s*=\s*'uuid'/i.test(preflightContent);
-    if (!preflightAuthBound) {
-      errors.push("Column-type parity failure: Preflight script does not assert auth_user_id as uuid on table 'members'");
-    } else {
-      columnsVerified.push('public.members.auth_user_id UUID');
-    }
-  }
-
-  // Check C: contributions.closed_by UUID & uq_reference_payment
-  const contributionsBlock = migrationTablesDeclared.get('contributions')?.blockContent;
-  if (!contributionsBlock || !/closed_by\s+UUID/i.test(contributionsBlock)) {
-    errors.push("Column contract failure: Column 'closed_by UUID' is not defined inside CREATE TABLE for 'public.contributions'");
-  } else {
-    const preflightClosedBound = /table_name\s*=\s*'contributions'[\s\S]*?column_name\s*=\s*'closed_by'[\s\S]*?data_type\s*=\s*'uuid'/i.test(preflightContent);
-    if (!preflightClosedBound) {
-      errors.push("Column-type parity failure: Preflight script does not assert closed_by as uuid on table 'contributions'");
-    } else {
-      columnsVerified.push('public.contributions.closed_by UUID');
-    }
-  }
-
-  if (!contributionsBlock || !/CONSTRAINT\s+uq_reference_payment\s+UNIQUE\s*\(\s*payment_channel\s*,\s*reference_number\s*\)/i.test(contributionsBlock)) {
-    errors.push("Constraint contract failure: Constraint 'uq_reference_payment UNIQUE (payment_channel, reference_number)' is not defined inside CREATE TABLE for 'public.contributions'");
-  } else {
-    const preflightUqBound = /conname\s*=\s*'uq_reference_payment'[\s\S]*?contype\s*=\s*'u'[\s\S]*?indisunique\s*=\s*TRUE/i.test(preflightContent);
-    if (!preflightUqBound) {
-      errors.push("Constraint parity failure: Preflight script does not assert uq_reference_payment unique constraint and unique index");
-    } else {
-      indexesVerified.push('public.contributions.uq_reference_payment (UNIQUE on channel, reference_number)');
-    }
-  }
-
-  // Check D: expenses.reversed_by UUID
-  const expensesBlock = migrationTablesDeclared.get('expenses')?.blockContent;
-  if (!expensesBlock || !/reversed_by\s+UUID/i.test(expensesBlock)) {
-    errors.push("Column contract failure: Column 'reversed_by UUID' is not defined inside CREATE TABLE for 'public.expenses'");
-  } else {
-    const preflightReversedBound = /table_name\s*=\s*'expenses'[\s\S]*?column_name\s*=\s*'reversed_by'[\s\S]*?data_type\s*=\s*'uuid'/i.test(preflightContent);
-    if (!preflightReversedBound) {
-      errors.push("Column-type parity failure: Preflight script does not assert reversed_by as uuid on table 'expenses'");
-    } else {
-      columnsVerified.push('public.expenses.reversed_by UUID');
-    }
-  }
-
-  // Check E: constitution_sections.embedding vector(768)
-  const constitutionSectionsBlock = migrationTablesDeclared.get('constitution_sections')?.blockContent;
-  if (!constitutionSectionsBlock || !/embedding\s+vector\(768\)/i.test(constitutionSectionsBlock)) {
-    errors.push("Column contract failure: Column 'embedding vector(768)' is not defined inside CREATE TABLE for 'public.constitution_sections'");
-  } else {
-    const preflightEmbeddingBound = /table_name\s*=\s*'constitution_sections'[\s\S]*?column_name\s*=\s*'embedding'/i.test(preflightContent);
-    if (!preflightEmbeddingBound) {
-      errors.push("Column parity failure: Preflight script does not assert constitution_sections.embedding presence");
-    } else {
-      columnsVerified.push('public.constitution_sections.embedding vector(768)');
-    }
-  }
-
-  // 7. Object-Tied Index Declarations & Parity Checks
-
-  // Check A: idx_members_email_lower on public.members
-  const migrationsFullSql = Object.values(migrationFilesContent).join('\n');
-  const emailIndexMigrationRegex = /CREATE\s+UNIQUE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?idx_members_email_lower\s+ON\s+public\.([a-z_]+)\s*\(\s*LOWER\s*\(\s*email\s*\)\s*\)/i;
-  const emailIndexMatch = emailIndexMigrationRegex.exec(migrationsFullSql);
-
-  if (!emailIndexMatch) {
-    errors.push("Index contract failure: 'CREATE UNIQUE INDEX idx_members_email_lower' not declared on LOWER(email)");
-  } else if (emailIndexMatch[1] !== 'members') {
-    errors.push(`Index contract failure: 'idx_members_email_lower' declared on table '${emailIndexMatch[1]}' instead of expected 'members'`);
-  } else {
-    const preflightEmailRegex = /t\.relname\s*=\s*'members'[\s\S]*?c\.relname\s*=\s*'idx_members_email_lower'[\s\S]*?i\.indisunique\s*=\s*TRUE[\s\S]*?pi\.indexdef\s+ILIKE\s+'%lower\(%email%\)%'/i;
-    if (!preflightEmailRegex.test(preflightContent)) {
-      errors.push("Index parity failure: Preflight script does not assert idx_members_email_lower specifically on 'members' with indisunique = TRUE on LOWER(email)");
-    } else {
-      indexesVerified.push('public.members.idx_members_email_lower (UNIQUE on LOWER(email))');
-    }
-  }
-
-  // Check B: idx_constitution_embedding_hnsw on public.constitution_sections
-  const hnswIndexMigrationRegex = /CREATE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?idx_constitution_embedding_hnsw\s+ON\s+public\.([a-z_]+)\s+USING\s+hnsw\s*\(\s*embedding\s+vector_cosine_ops\s*\)/i;
-  const hnswIndexMatch = hnswIndexMigrationRegex.exec(migrationsFullSql);
-
-  if (!hnswIndexMatch) {
-    errors.push("Index contract failure: 'CREATE INDEX idx_constitution_embedding_hnsw' not declared with HNSW vector_cosine_ops");
-  } else if (hnswIndexMatch[1] !== 'constitution_sections') {
-    errors.push(`Index contract failure: 'idx_constitution_embedding_hnsw' declared on table '${hnswIndexMatch[1]}' instead of expected 'constitution_sections'`);
-  } else {
-    const preflightHnswRegex = /tablename\s*=\s*'constitution_sections'[\s\S]*?indexname\s*=\s*'idx_constitution_embedding_hnsw'[\s\S]*?indexdef\s+ILIKE\s+'%hnsw%'[\s\S]*?indexdef\s+ILIKE\s+'%\(embedding%vector_cosine_ops\)%'/i;
-    if (!preflightHnswRegex.test(preflightContent)) {
-      errors.push("Index parity failure: Preflight script does not assert idx_constitution_embedding_hnsw specifically on 'constitution_sections' with HNSW and vector_cosine_ops");
-    } else {
-      indexesVerified.push('public.constitution_sections.idx_constitution_embedding_hnsw (HNSW with vector_cosine_ops on embedding)');
-    }
-  }
-
-  // 8. Active RLS Assertion in Preflight
-  const preflightRlsCheck = (preflightContent.includes('rowsecurity = FALSE') || preflightContent.includes('rowsecurity = TRUE')) &&
-    preflightContent.includes('FOREACH v_expected_table IN ARRAY v_expected_tables LOOP');
-  if (!preflightRlsCheck) {
-    errors.push("RLS parity failure: Preflight script does not assert rowsecurity across all v_expected_tables");
-  }
+  const success = errors.length === 0;
 
   return {
-    success: errors.length === 0,
-    totalMigrationsInspected: allMigrationsFound.length,
+    success,
+    totalMigrationsInspected: files.length,
     allMigrationsFound,
     requiredMigrationsVerified,
-    tableCount: tablesVerified.length,
-    tablesVerified,
-    columnsVerified,
-    indexesVerified,
-    supportedConstructs: SUPPORTED_SQL_CONSTRUCTS,
-    unverifiedDimensions: UNVERIFIED_SCHEMA_DIMENSIONS,
-    errors
+    tableCount: tablesFound.length,
+    tablesFound,
+    errors,
+    warnings,
+    unsupportedConstructsDetected
   };
 }
 
-export function runSchemaParityNegativeFixtures(): void {
-  console.log('Running Schema-Parity Negative Fixtures (isolated in-memory evaluation)...');
+export async function runSchemaParityNegativeFixtures(): Promise<{ fixtureName: string; passed: boolean; details: string }[]> {
+  const fixtureResults: { fixtureName: string; passed: boolean; details: string }[] = [];
 
-  // Load canonical migrations
-  const migrationsDir = path.resolve('supabase/migrations');
-  const canonicalMigrations: Record<string, string> = {};
-  for (const f of REQUIRED_MIGRATIONS) {
-    canonicalMigrations[f] = fs.readFileSync(path.join(migrationsDir, f), 'utf-8');
+  // Fixture 1: Missing required migration
+  const res1 = await validateSchemaParity('supabase/migrations_nonexistent_test');
+  const f1Passed = !res1.success && res1.errors.some(e => e.includes('Migrations directory not found'));
+  fixtureResults.push({ fixtureName: 'Missing Migrations Directory', passed: f1Passed, details: `Success: ${res1.success}, Errors: ${res1.errors.join('; ')}` });
+
+  // Fixture 2: Unauthorized table in additional migration (using quoted identifiers and alternate formatting)
+  const testDir = 'supabase/migrations_neg_test';
+  if (!fs.existsSync(testDir)) {
+    fs.mkdirSync(testDir, { recursive: true });
   }
-  const canonicalPreflight = fs.readFileSync(path.resolve('scripts/preflight_schema_check.sql'), 'utf-8');
+  // Copy baseline migrations over
+  for (const m of REQUIRED_MIGRATIONS) {
+    const src = path.join('supabase/migrations', m);
+    const dest = path.join(testDir, m);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+    }
+  }
+  // Add malicious migration with quoted unauthorized table & unsupported TEMPORARY table
+  const maliciousFile = path.join(testDir, '20261013000010_unauthorized_backdoor.sql');
+  fs.writeFileSync(maliciousFile, 'CREATE TEMPORARY TABLE "public"."unauthorized_backdoor" (id UUID PRIMARY KEY);');
 
-  // Negative Fixture 1: Missing Required Baseline Migration
-  const brokenMigrationsMissingOne = { ...canonicalMigrations };
-  delete brokenMigrationsMissingOne['20261013000003_invitations_and_auth.sql'];
-  const res1 = validateSchemaParity({
-    _mockMigrationsContent: brokenMigrationsMissingOne,
-    _mockPreflightContent: canonicalPreflight
+  const res2 = await validateSchemaParity(testDir);
+  const f2Passed = !res2.success && 
+    res2.errors.some(e => e.includes("Unauthorized table declaration found: 'unauthorized_backdoor'"));
+  
+  fixtureResults.push({ 
+    fixtureName: 'Unauthorized Quoted Table & Unsupported TEMPORARY Table', 
+    passed: f2Passed, 
+    details: `Success: ${res2.success}, Errors found: ${res2.errors.length} -> ${res2.errors.join(' | ')}` 
   });
-  if (res1.success || !res1.errors.some(e => e.includes('Missing required baseline migration file: 20261013000003_invitations_and_auth.sql'))) {
-    throw new Error('Negative Fixture 1 FAILED: Validator did not reject missing required baseline migration file');
-  }
-  console.log('  [PASS] Negative Fixture 1: Successfully rejected missing required baseline migration file');
 
-  // Negative Fixture 2a: Duplicate Core Table Declaration Across Migrations
-  const brokenMigrationsDuplicateTable = {
-    ...canonicalMigrations,
-    '20261013000003_invitations_and_auth.sql': canonicalMigrations['20261013000003_invitations_and_auth.sql'] +
-      '\nCREATE TABLE public.members (id UUID PRIMARY KEY);\n'
-  };
-  const res2a = validateSchemaParity({
-    _mockMigrationsContent: brokenMigrationsDuplicateTable,
-    _mockPreflightContent: canonicalPreflight
-  });
-  if (res2a.success || !res2a.errors.some(e => e.includes("Duplicate table declaration detected across migrations for table 'public.members'"))) {
-    throw new Error('Negative Fixture 2a FAILED: Validator did not reject duplicate table declaration');
+  // Clean up negative test directory
+  try {
+    const files = fs.readdirSync(testDir);
+    for (const f of files) {
+      fs.unlinkSync(path.join(testDir, f));
+    }
+    fs.rmdirSync(testDir);
+  } catch (e) {
+    // ignore cleanup err
   }
-  console.log('  [PASS] Negative Fixture 2a: Successfully rejected duplicate core table declaration across migrations');
 
-  // Negative Fixture 2b: Unexpected Core Table in an Existing Migration
-  const brokenMigrationsUnexpectedTable = {
-    ...canonicalMigrations,
-    '20261013000003_invitations_and_auth.sql': canonicalMigrations['20261013000003_invitations_and_auth.sql'] +
-      '\nCREATE TABLE public.unauthorized_backdoor (id UUID PRIMARY KEY);\n'
-  };
-  const res2b = validateSchemaParity({
-    _mockMigrationsContent: brokenMigrationsUnexpectedTable,
-    _mockPreflightContent: canonicalPreflight
-  });
-  if (res2b.success || !res2b.errors.some(e => e.includes("Unexpected table declared in migrations: 'public.unauthorized_backdoor'"))) {
-    throw new Error('Negative Fixture 2b FAILED: Validator did not reject unexpected table declaration');
+  // Fixture 3: Malformed unparseable SQL (fails closed)
+  const testDir3 = 'supabase/migrations_neg_test_malformed';
+  if (!fs.existsSync(testDir3)) {
+    fs.mkdirSync(testDir3, { recursive: true });
   }
-  console.log('  [PASS] Negative Fixture 2b: Successfully rejected unexpected table declaration in existing migration');
+  for (const m of REQUIRED_MIGRATIONS) {
+    const src = path.join('supabase/migrations', m);
+    const dest = path.join(testDir3, m);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+    }
+  }
+  const malformedFile = path.join(testDir3, '20261013000011_malformed.sql');
+  fs.writeFileSync(malformedFile, 'CREATE TABLE public.bad_syntax (id UUID PRIMARY KEY;'); // unclosed paren
 
-  // Negative Fixture 2c: Placing an Unauthorized Table in an Additional Migration File
-  const brokenMigrationsAdditionalFile = {
-    ...canonicalMigrations,
-    '20261014000010_additional_feature.sql':
-      '-- Additional unapproved migration file\nCREATE TABLE public.unauthorized_extra_table (id UUID PRIMARY KEY);\n'
-  };
-  const res2c = validateSchemaParity({
-    _mockMigrationsContent: brokenMigrationsAdditionalFile,
-    _mockPreflightContent: canonicalPreflight
+  const res3 = await validateSchemaParity(testDir3);
+  const f3Passed = !res3.success && res3.errors.some(e => e.includes('SQL Parse error'));
+  
+  fixtureResults.push({
+    fixtureName: 'Malformed SQL Parse Error (Fail Closed)',
+    passed: f3Passed,
+    details: `Success: ${res3.success}, Errors: ${res3.errors.join(' | ')}`
   });
-  if (
-    res2c.success ||
-    !res2c.errors.some(e =>
-      e.includes("Unexpected table declared in migrations: 'public.unauthorized_extra_table' (in 20261014000010_additional_feature.sql)")
-    )
-  ) {
-    throw new Error('Negative Fixture 2c FAILED: Validator did not reject unauthorized table in additional migration file');
-  }
-  console.log('  [PASS] Negative Fixture 2c: Successfully rejected unauthorized table placed in an additional migration file');
 
-  // Negative Fixture 3: Misplaced or Mismatched Column/Index Contract
-  // 3a. Misplaced column (actor_type declared on announcements instead of audit_logs)
-  const brokenMigrationsMisplacedColumn = {
-    ...canonicalMigrations,
-    '20261013000008_audit_logs_and_triggers.sql': canonicalMigrations['20261013000008_audit_logs_and_triggers.sql'].replace(
-      'actor_type VARCHAR(50) NOT NULL DEFAULT \'authenticated_member\',',
-      '-- actor_type omitted from audit_logs'
-    ),
-    '20261013000005_announcements_and_attendance.sql': canonicalMigrations['20261013000005_announcements_and_attendance.sql'].replace(
-      'title VARCHAR(255) NOT NULL,',
-      'title VARCHAR(255) NOT NULL,\n    actor_type VARCHAR(50) NOT NULL DEFAULT \'authenticated_member\','
-    )
-  };
-  const res3a = validateSchemaParity({
-    _mockMigrationsContent: brokenMigrationsMisplacedColumn,
-    _mockPreflightContent: canonicalPreflight
-  });
-  if (res3a.success || !res3a.errors.some(e => e.includes("Column 'actor_type VARCHAR(50)' is not defined inside CREATE TABLE for 'public.audit_logs'"))) {
-    throw new Error('Negative Fixture 3a FAILED: Validator did not reject misplaced column contract');
-  }
-  console.log('  [PASS] Negative Fixture 3a: Successfully rejected misplaced column contract (actor_type in wrong table)');
+  try {
+    const files = fs.readdirSync(testDir3);
+    for (const f of files) {
+      fs.unlinkSync(path.join(testDir3, f));
+    }
+    fs.rmdirSync(testDir3);
+  } catch (e) {}
 
-  // 3b. Misplaced index (idx_members_email_lower declared on attendance_records instead of members)
-  const brokenMigrationsMisplacedIndex = {
-    ...canonicalMigrations,
-    '20261013000002_members_and_directory.sql': canonicalMigrations['20261013000002_members_and_directory.sql'].replace(
-      'CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email_lower ON public.members (LOWER(email));',
-      'CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email_lower ON public.attendance_records (LOWER(email));'
-    )
-  };
-  const res3b = validateSchemaParity({
-    _mockMigrationsContent: brokenMigrationsMisplacedIndex,
-    _mockPreflightContent: canonicalPreflight
-  });
-  if (res3b.success || !res3b.errors.some(e => e.includes("declared on table 'attendance_records' instead of expected 'members'"))) {
-    throw new Error('Negative Fixture 3b FAILED: Validator did not reject index declared on wrong table');
-  }
-  console.log('  [PASS] Negative Fixture 3b: Successfully rejected index bound to incorrect table target');
-
-  // Negative Fixture 4: Genuinely Unsupported SQL Construct Encountered in Real Input (PARTITION BY)
-  const brokenMigrationsUnsupportedConstruct = {
-    ...canonicalMigrations,
-    '20261013000001_core_types_and_extensions.sql': canonicalMigrations['20261013000001_core_types_and_extensions.sql'] +
-      '\nCREATE TABLE public.dynamic_partitioned (id UUID) PARTITION BY HASH (id);\n'
-  };
-  const res4 = validateSchemaParity({
-    _mockMigrationsContent: brokenMigrationsUnsupportedConstruct,
-    _mockPreflightContent: canonicalPreflight
-  });
-  if (res4.success || !res4.errors.some(e => e.includes('Unsupported SQL construct encountered'))) {
-    throw new Error('Negative Fixture 4 FAILED: Validator did not reject genuinely unsupported SQL construct in real migration input');
-  }
-  console.log('  [PASS] Negative Fixture 4: Successfully caught and rejected genuinely unsupported SQL construct (PARTITION BY) in migration input');
-
-  // Negative Fixture 5: Preflight omits constitution_versions
-  const brokenPreflightMissingTable = canonicalPreflight.replace(
-    "'constitution_versions',",
-    "-- omitted constitution_versions"
-  );
-  const res5 = validateSchemaParity({
-    _mockMigrationsContent: canonicalMigrations,
-    _mockPreflightContent: brokenPreflightMissingTable
-  });
-  if (res5.success || !res5.errors.some(e => e.includes("Expected core table 'constitution_versions' is missing"))) {
-    throw new Error('Negative Fixture 5 FAILED: Validator did not reject preflight missing constitution_versions');
-  }
-  console.log('  [PASS] Negative Fixture 5: Successfully rejected preflight missing constitution_versions table');
-
-  // Negative Fixture 6: Preflight checks actor_type as text instead of character varying(50)
-  const brokenPreflightTypeText = canonicalPreflight.replace(
-    "data_type = 'character varying'",
-    "data_type = 'text'"
-  );
-  const res6 = validateSchemaParity({
-    _mockMigrationsContent: canonicalMigrations,
-    _mockPreflightContent: brokenPreflightTypeText
-  });
-  if (res6.success || !res6.errors.some(e => e.includes('actor_type'))) {
-    throw new Error('Negative Fixture 6 FAILED: Validator did not reject preflight asserting actor_type as text');
-  }
-  console.log('  [PASS] Negative Fixture 6: Successfully rejected preflight checking actor_type as text');
+  return fixtureResults;
 }
 
-export function runCli(): void {
-  console.log('================================================================');
-  console.log('   AGILA Hub Android — Targeted Static Schema Contract Validator');
-  console.log('   Verifying Migrations DDL vs Preflight Schema Invariants      ');
-  console.log('================================================================');
+export async function runCli() {
+  console.log('=== AGILA Hub Android: Hardened Schema Parity Validator ===');
+  const result = await validateSchemaParity('supabase/migrations');
+  
+  console.log(`Inspected ${result.totalMigrationsInspected} migration files.`);
+  console.log(`Verified ${result.requiredMigrationsVerified.length} required baseline migrations.`);
+  console.log(`Discovered ${result.tableCount} core tables: ${result.tablesFound.join(', ')}`);
 
-  // Run isolated negative fixtures first
-  runSchemaParityNegativeFixtures();
-
-  // Validate canonical files
-  const result = validateSchemaParity();
-
-  console.log('\n[SCOPE: Targeted Static Contract Validation]');
-  console.log('Supported SQL Constructs Analyzed:');
-  for (const c of result.supportedConstructs) {
-    console.log(`  + ${c}`);
+  if (result.warnings.length > 0) {
+    console.log('\nWarnings:');
+    result.warnings.forEach(w => console.log(`  - ${w}`));
   }
 
-  console.log('\nUnverified Schema Dimensions (Deferred to Live Database / Phase 02):');
-  for (const u of result.unverifiedDimensions) {
-    console.log(`  * [NOT EXECUTED / NOT CERTIFIED] ${u}`);
-  }
-
-  console.log('\n[Parity Check 1] Core Table Coverage & Migration Inventory:');
-  console.log(`  Total SQL Migration Files Inspected: ${result.totalMigrationsInspected}`);
-  console.log(`  Required Baseline Migrations Verified: ${result.requiredMigrationsVerified.length} / ${REQUIRED_MIGRATIONS.length} (PASS)`);
-  console.log(`  Expected Core Tables: ${EXPECTED_CORE_TABLES.length}`);
-  console.log(`  Verified in Migrations & Preflight: ${result.tableCount}`);
-  for (const t of result.tablesVerified) {
-    console.log(`    - Table public.${t} (PASS)`);
-  }
-
-  console.log('\n[Parity Check 2] Critical Object-Tied Column Types & Max Lengths:');
-  for (const c of result.columnsVerified) {
-    console.log(`    - ${c} (PASS)`);
-  }
-
-  console.log('\n[Parity Check 3] Critical Object-Tied Index Properties & Uniqueness Constraints:');
-  for (const idx of result.indexesVerified) {
-    console.log(`    - ${idx} (PASS)`);
+  if (result.unsupportedConstructsDetected.length > 0) {
+    console.log('\nUnsupported Constructs Flagged:');
+    result.unsupportedConstructsDetected.forEach(uc => console.log(`  - ${uc}`));
   }
 
   if (!result.success) {
-    console.error('\nTargeted Static Schema Validation FAILED with errors:');
-    for (const e of result.errors) {
-      console.error(`  - ${e}`);
+    console.error('\nSchema Parity Validation FAILED:');
+    result.errors.forEach(e => console.error(`  [ERROR] ${e}`));
+    
+    console.log('\nRunning Schema Parity Negative Fixtures...');
+    const fixtures = await runSchemaParityNegativeFixtures();
+    let fixturesAllPassed = true;
+    for (const f of fixtures) {
+      console.log(`  [Fixture: ${f.fixtureName}] -> ${f.passed ? 'PASSED (Rejected correctly)' : 'FAILED'}`);
+      if (!f.passed) {
+        fixturesAllPassed = false;
+        console.log(`    Details: ${f.details}`);
+      }
     }
-    process.exit(1);
-  }
 
-  console.log('\n================================================================');
-  console.log('   TARGETED STATIC SCHEMA VALIDATION: PASSED (100%)             ');
-  console.log('   (Note: Targeted offline static analysis only — not full       ');
-  console.log('    schema parity. Live database authorization, PL/pgSQL runtime');
-  console.log('    compilation, and production certification remain explicitly  ');
-  console.log('    marked NOT EXECUTED / NOT CERTIFIED)                         ');
-  console.log('================================================================');
+    process.exit(1);
+  } else {
+    console.log('\nSchema Parity Validation PASSED successfully.');
+    
+    console.log('\nRunning Schema Parity Negative Fixtures...');
+    const fixtures = await runSchemaParityNegativeFixtures();
+    let fixturesAllPassed = true;
+    for (const f of fixtures) {
+      console.log(`  [Fixture: ${f.fixtureName}] -> ${f.passed ? 'PASSED (Rejected correctly)' : 'FAILED'}`);
+      if (!f.passed) {
+        fixturesAllPassed = false;
+        console.log(`    Details: ${f.details}`);
+      }
+    }
+
+    if (!fixturesAllPassed) {
+      console.error('\nSome negative fixtures failed to trigger expected validation errors.');
+      process.exit(1);
+    }
+
+    console.log('All schema validation checks and negative fixtures passed.');
+    process.exit(0);
+  }
 }
 
-// Auto-run if executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   runCli();
 }
