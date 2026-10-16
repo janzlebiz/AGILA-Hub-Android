@@ -5,7 +5,7 @@
   "authoritativeSource": "AGILA Hub Android Requirements Authority",
   "summary": {
     "totalRequirements": 22,
-    "staticContractPassed": 22,
+    "staticContractPassed": 15,
     "runtimeCloudScheduled": 17,
     "runtimeCloudExecuted": 0,
     "productionCertified": 0,

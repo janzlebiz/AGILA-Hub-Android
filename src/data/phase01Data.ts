@@ -261,77 +261,77 @@ export const phase01TestResults: TestCase[] = [
     "id": "RLS-MEMBERS",
     "name": "RLS Enabled on public.members",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 2 static migration policy definition(s): \"members_read_policy\" (SELECT TO authenticated USING), \"members_self_update_policy\" (UPDATE TO authenticated USING WITH CHECK); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 2 static migration policy definition(s): \"members_read_policy\" (SELECT TO authenticated USING), \"members_self_update_policy\" (UPDATE TO authenticated USING WITH CHECK); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-MEMBER_INVITATIONS",
     "name": "RLS Enabled on public.member_invitations",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"invitations_admin_select\" (SELECT TO authenticated USING); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"invitations_admin_select\" (SELECT TO authenticated USING); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-EAGLES_ID_CARDS",
     "name": "RLS Enabled on public.eagles_id_cards",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 4 static migration policy definition(s): \"eagles_id_select\" (SELECT TO authenticated USING), \"eagles_id_insert\" (INSERT TO authenticated WITH CHECK), \"eagles_id_update\" (UPDATE TO authenticated USING WITH CHECK), \"eagles_id_delete\" (DELETE TO authenticated USING); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 4 static migration policy definition(s): \"eagles_id_select\" (SELECT TO authenticated USING), \"eagles_id_insert\" (INSERT TO authenticated WITH CHECK), \"eagles_id_update\" (UPDATE TO authenticated USING WITH CHECK), \"eagles_id_delete\" (DELETE TO authenticated USING); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-ANNOUNCEMENTS",
     "name": "RLS Enabled on public.announcements",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 4 static migration policy definition(s): \"announcements_read_active\" (SELECT TO authenticated USING), \"announcements_write_officers\" (INSERT TO authenticated WITH CHECK), \"announcements_update_authors\" (UPDATE TO authenticated USING), \"announcements_delete_authors\" (DELETE TO authenticated USING); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 4 static migration policy definition(s): \"announcements_read_active\" (SELECT TO authenticated USING), \"announcements_write_officers\" (INSERT TO authenticated WITH CHECK), \"announcements_update_authors\" (UPDATE TO authenticated USING), \"announcements_delete_authors\" (DELETE TO authenticated USING); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-ATTENDANCE_EVENTS",
     "name": "RLS Enabled on public.attendance_events",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 2 static migration policy definition(s): \"events_read_active\" (SELECT TO authenticated USING), \"events_write_officers\" (ALL TO authenticated USING WITH CHECK); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 2 static migration policy definition(s): \"events_read_active\" (SELECT TO authenticated USING), \"events_write_officers\" (ALL TO authenticated USING WITH CHECK); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-ATTENDANCE_RECORDS",
     "name": "RLS Enabled on public.attendance_records",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 2 static migration policy definition(s): \"attendance_read\" (SELECT TO authenticated USING), \"attendance_write_officers\" (ALL TO authenticated USING WITH CHECK); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 2 static migration policy definition(s): \"attendance_read\" (SELECT TO authenticated USING), \"attendance_write_officers\" (ALL TO authenticated USING WITH CHECK); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-CONTRIBUTIONS",
     "name": "RLS Enabled on public.contributions",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 3 static migration policy definition(s): \"contributions_read\" (SELECT TO authenticated USING), \"contributions_write_finance\" (INSERT TO authenticated WITH CHECK), \"contributions_update_finance\" (UPDATE TO authenticated USING WITH CHECK); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 3 static migration policy definition(s): \"contributions_read\" (SELECT TO authenticated USING), \"contributions_write_finance\" (INSERT TO authenticated WITH CHECK), \"contributions_update_finance\" (UPDATE TO authenticated USING WITH CHECK); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-EXPENSES",
     "name": "RLS Enabled on public.expenses",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 4 static migration policy definition(s): \"expenses_read_finance\" (SELECT TO authenticated USING), \"expenses_write_finance\" (INSERT TO authenticated WITH CHECK), \"expenses_update_finance\" (UPDATE TO authenticated USING WITH CHECK), \"expenses_delete_finance\" (DELETE TO authenticated USING); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 4 static migration policy definition(s): \"expenses_read_finance\" (SELECT TO authenticated USING), \"expenses_write_finance\" (INSERT TO authenticated WITH CHECK), \"expenses_update_finance\" (UPDATE TO authenticated USING WITH CHECK), \"expenses_delete_finance\" (DELETE TO authenticated USING); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-CONSTITUTION_VERSIONS",
     "name": "RLS Enabled on public.constitution_versions",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"constitution_read_active\" (SELECT TO authenticated USING); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"constitution_read_active\" (SELECT TO authenticated USING); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-CONSTITUTION_SECTIONS",
     "name": "RLS Enabled on public.constitution_sections",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"sections_read_active\" (SELECT TO authenticated USING); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"sections_read_active\" (SELECT TO authenticated USING); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "RLS Policies",
     "id": "RLS-AUDIT_LOGS",
     "name": "RLS Enabled on public.audit_logs",
     "status": "PASS",
-    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"audit_logs_read_admins\" (SELECT TO authenticated USING); 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)"
+    "evidence": "Verified ENABLE ROW LEVEL SECURITY and validated 1 static migration policy definition(s): \"audit_logs_read_admins\" (SELECT TO authenticated USING); AST predicate safety & positive/negative fixtures verified"
   },
   {
     "suite": "Preflight Script",

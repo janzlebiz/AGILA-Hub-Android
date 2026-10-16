@@ -416,11 +416,11 @@ async function runPhase01Verification() {
     return null;
   }
 
-  function validateTableRlsPolicies(
+  async function validateTableRlsPolicies(
     table: string,
     sql: string,
     expectedPolicies: ExpectedRlsPolicy[]
-  ): { valid: boolean; error?: string; policiesFound: string[] } {
+  ): Promise<{ valid: boolean; error?: string; policiesFound: string[] }> {
     const escapedTable = table.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, '\\$1');
     const regex = new RegExp(`CREATE\\s+POLICY\\s+"([^"]+)"\\s+ON\\s+public\\.${escapedTable}([\\s\\S]*?);`, 'gi');
     const parsed: Array<{ name: string; cmd: string | null; roles: string[]; usingExpr: string | null; withCheckExpr: string | null }> = [];
@@ -507,16 +507,64 @@ async function runPhase01Verification() {
         };
       }
 
-      // Semantic predicate safety checks: reject USING (true) or unsafe OR bypasses
-      const checkUnsafeExpr = (expr: string | null) => {
+      // Semantic AST-based predicate safety checks using pgsql-parser AST inspection
+      const checkUnsafeExprAst = async (expr: string | null): Promise<boolean> => {
         if (!expr) return false;
-        const normalized = expr.replace(/\s+/g, ' ').trim().toLowerCase();
-        if (normalized === 'true' || normalized === '(true)') return true;
-        if (/\bor\s+true\b/.test(normalized) || /\bor\s+1\s*=\s*1\b/.test(normalized)) return true;
-        return false;
+        try {
+          const parsedAst = await parse(`SELECT (${expr});`);
+          let isUnsafe = false;
+
+          const walkAst = (node: any) => {
+            if (!node || typeof node !== 'object') return;
+
+            // Check for literal boolean constant TRUE
+            if (node.A_Const?.boolval?.boolval === true) {
+              isUnsafe = true;
+            }
+
+            // Check for BoolExpr (OR_EXPR)
+            if (node.BoolExpr?.boolop === 'OR_EXPR' && Array.isArray(node.BoolExpr.args)) {
+              for (const arg of node.BoolExpr.args) {
+                let argIsTrue = false;
+                const checkArg = (sub: any) => {
+                  if (!sub || typeof sub !== 'object') return;
+                  if (sub.A_Const?.boolval?.boolval === true) argIsTrue = true;
+                  for (const k of Object.keys(sub)) checkArg(sub[k]);
+                };
+                checkArg(arg);
+                if (argIsTrue) isUnsafe = true;
+              }
+            }
+
+            // Check for binary expressions (A_Expr) such as =
+            if (node.A_Expr) {
+              const name = node.A_Expr.name;
+              if (Array.isArray(name)) {
+                const op = name.map((n: any) => n.String?.sval).join('.');
+                if (op === '=') {
+                  const l = JSON.stringify(node.A_Expr.lexpr);
+                  const r = JSON.stringify(node.A_Expr.rexpr);
+                  if (l === r && l.includes('A_Const')) {
+                    isUnsafe = true;
+                  }
+                }
+              }
+            }
+
+            for (const key of Object.keys(node)) {
+              walkAst(node[key]);
+            }
+          };
+
+          walkAst(parsedAst);
+          return isUnsafe;
+        } catch (err) {
+          return true; // Fail closed on unparseable expressions
+        }
       };
-      if (checkUnsafeExpr(found.usingExpr) || checkUnsafeExpr(found.withCheckExpr)) {
-        return { valid: false, error: `Policy "${exp.name}" contains unsafe or overly permissive predicate (USING true or OR bypass)`, policiesFound: parsed.map(p => p.name) };
+
+      if (await checkUnsafeExprAst(found.usingExpr) || await checkUnsafeExprAst(found.withCheckExpr)) {
+        return { valid: false, error: `Policy "${exp.name}" contains unsafe or overly permissive predicate (AST Boolean tautology / bypass)`, policiesFound: parsed.map(p => p.name) };
       }
 
       if (exp.usingPattern && (!found.usingExpr || !exp.usingPattern.test(found.usingExpr))) {
@@ -550,24 +598,24 @@ async function runPhase01Verification() {
   `;
 
   // Fixture 1: Missing expected policy (members_self_update_policy omitted)
-  const rlsNeg1 = validateTableRlsPolicies('members', validMembersReadPolicy, rlsContracts.members);
+  const rlsNeg1 = await validateTableRlsPolicies('members', validMembersReadPolicy, rlsContracts.members);
 
   // Fixture 2: Unauthorized role (assigned to 'anon' instead of 'authenticated')
-  const rlsNeg2 = validateTableRlsPolicies('member_invitations', 'CREATE POLICY "invitations_admin_select" ON public.member_invitations FOR SELECT TO anon USING (public.is_active_member() AND (public.get_caller_auth()).user_role IN (\'admin\', \'super_admin\'));', rlsContracts.member_invitations);
+  const rlsNeg2 = await validateTableRlsPolicies('member_invitations', 'CREATE POLICY "invitations_admin_select" ON public.member_invitations FOR SELECT TO anon USING (public.is_active_member() AND (public.get_caller_auth()).user_role IN (\'admin\', \'super_admin\'));', rlsContracts.member_invitations);
 
   // Fixture 3: SQL command mismatch (declared FOR INSERT instead of FOR SELECT)
-  const rlsNeg3 = validateTableRlsPolicies('member_invitations', 'CREATE POLICY "invitations_admin_select" ON public.member_invitations FOR INSERT TO authenticated WITH CHECK (public.is_active_member());', rlsContracts.member_invitations);
+  const rlsNeg3 = await validateTableRlsPolicies('member_invitations', 'CREATE POLICY "invitations_admin_select" ON public.member_invitations FOR INSERT TO authenticated WITH CHECK (public.is_active_member());', rlsContracts.member_invitations);
 
   // Fixture 4: Missing USING clause on SELECT policy
-  const rlsNeg4 = validateTableRlsPolicies('constitution_versions', 'CREATE POLICY "constitution_read_active" ON public.constitution_versions FOR SELECT TO authenticated;', rlsContracts.constitution_versions);
+  const rlsNeg4 = await validateTableRlsPolicies('constitution_versions', 'CREATE POLICY "constitution_read_active" ON public.constitution_versions FOR SELECT TO authenticated;', rlsContracts.constitution_versions);
 
   // Fixture 5: Duplicate policy declaration
   const duplicatePolicySql = validMembersReadPolicy + '\n' + validMembersReadPolicy + '\n' + validMembersUpdatePolicy;
-  const rlsNeg5 = validateTableRlsPolicies('members', duplicatePolicySql, rlsContracts.members);
+  const rlsNeg5 = await validateTableRlsPolicies('members', duplicatePolicySql, rlsContracts.members);
 
   // Fixture 6: Extra/unexpected policy
   const extraPolicySql = validMembersReadPolicy + `\n` + validMembersUpdatePolicy + `\nCREATE POLICY "extra_policy" ON public.members FOR SELECT TO authenticated USING (true);`;
-  const rlsNeg6 = validateTableRlsPolicies('members', extraPolicySql, rlsContracts.members);
+  const rlsNeg6 = await validateTableRlsPolicies('members', extraPolicySql, rlsContracts.members);
 
   // Fixture 7: Extra permissive USING (true) policy
   const unsafeTrueSql = `
@@ -579,7 +627,7 @@ async function runPhase01Verification() {
       USING (public.is_active_member() AND auth_user_id = auth.uid())
       WITH CHECK (public.is_active_member() AND auth_user_id = auth.uid());
   `;
-  const rlsNeg7 = validateTableRlsPolicies('members', unsafeTrueSql, rlsContracts.members);
+  const rlsNeg7 = await validateTableRlsPolicies('members', unsafeTrueSql, rlsContracts.members);
 
   // Fixture 8: Unsafe Boolean OR bypass
   const unsafeOrSql = `
@@ -591,16 +639,31 @@ async function runPhase01Verification() {
       USING (public.is_active_member() AND auth_user_id = auth.uid())
       WITH CHECK (public.is_active_member() AND auth_user_id = auth.uid());
   `;
-  const rlsNeg8 = validateTableRlsPolicies('members', unsafeOrSql, rlsContracts.members);
+  const rlsNeg8 = await validateTableRlsPolicies('members', unsafeOrSql, rlsContracts.members);
 
-  console.log('RLS NEG 1:', rlsNeg1);
-  console.log('RLS NEG 2:', rlsNeg2);
-  console.log('RLS NEG 3:', rlsNeg3);
-  console.log('RLS NEG 4:', rlsNeg4);
-  console.log('RLS NEG 5:', rlsNeg5);
-  console.log('RLS NEG 6:', rlsNeg6);
-  console.log('RLS NEG 7:', rlsNeg7);
-  console.log('RLS NEG 8:', rlsNeg8);
+  // Fixture 9: Nested Boolean tautology (FALSE OR (TRUE))
+  const unsafeNestedSql = `
+    CREATE POLICY "members_read_policy" ON public.members
+      FOR SELECT TO authenticated
+      USING (FALSE OR (TRUE));
+    CREATE POLICY "members_self_update_policy" ON public.members
+      FOR UPDATE TO authenticated
+      USING (public.is_active_member() AND auth_user_id = auth.uid())
+      WITH CHECK (public.is_active_member() AND auth_user_id = auth.uid());
+  `;
+  const rlsNeg9 = await validateTableRlsPolicies('members', unsafeNestedSql, rlsContracts.members);
+
+  // Positive Fixture 1: Legitimate ownership/admin predicate matching canonical contract
+  const posOwnershipSql = validMembersReadPolicy + '\n' + validMembersUpdatePolicy;
+  const rlsPos1 = await validateTableRlsPolicies('members', posOwnershipSql, rlsContracts.members);
+
+  // Positive Fixture 2: Legitimate admin role predicate on member_invitations
+  const posAdminSql = `
+    CREATE POLICY "invitations_admin_select" ON public.member_invitations
+      FOR SELECT TO authenticated
+      USING (public.is_active_member() AND (public.get_caller_auth()).user_role IN ('admin', 'super_admin'));
+  `;
+  const rlsPos2 = await validateTableRlsPolicies('member_invitations', posAdminSql, rlsContracts.member_invitations);
 
   if (rlsNeg1.valid || !rlsNeg1.error?.includes('Missing expected policy')) throw new Error(`Negative Fixture 1 failed: ${JSON.stringify(rlsNeg1)}`);
   if (rlsNeg2.valid || !rlsNeg2.error?.includes('roles mismatch')) throw new Error(`Negative Fixture 2 failed: ${JSON.stringify(rlsNeg2)}`);
@@ -608,16 +671,19 @@ async function runPhase01Verification() {
   if (rlsNeg4.valid || !rlsNeg4.error?.includes('USING clause')) throw new Error(`Negative Fixture 4 failed: ${JSON.stringify(rlsNeg4)}`);
   if (rlsNeg5.valid || !rlsNeg5.error?.includes('Duplicate policy declaration')) throw new Error(`Negative Fixture 5 failed: ${JSON.stringify(rlsNeg5)}`);
   if (rlsNeg6.valid || !rlsNeg6.error?.includes('Policy inventory count mismatch')) throw new Error(`Negative Fixture 6 failed: ${JSON.stringify(rlsNeg6)}`);
-  if (rlsNeg7.valid || !rlsNeg7.error?.includes('unsafe or overly permissive predicate')) throw new Error(`Negative Fixture 7 failed: ${JSON.stringify(rlsNeg7)}`);
-  if (rlsNeg8.valid || !rlsNeg8.error?.includes('unsafe or overly permissive predicate')) throw new Error(`Negative Fixture 8 failed: ${JSON.stringify(rlsNeg8)}`);
+  if (rlsNeg7.valid || !rlsNeg7.error?.includes('AST Boolean tautology')) throw new Error(`Negative Fixture 7 failed: ${JSON.stringify(rlsNeg7)}`);
+  if (rlsNeg8.valid || !rlsNeg8.error?.includes('AST Boolean tautology')) throw new Error(`Negative Fixture 8 failed: ${JSON.stringify(rlsNeg8)}`);
+  if (rlsNeg9.valid || !rlsNeg9.error?.includes('AST Boolean tautology')) throw new Error(`Negative Fixture 9 failed: ${JSON.stringify(rlsNeg9)}`);
+  if (!rlsPos1.valid) throw new Error(`Positive Fixture 1 failed: ${rlsPos1.error}`);
+  if (!rlsPos2.valid) throw new Error(`Positive Fixture 2 failed: ${rlsPos2.error}`);
 
   rlsNegativeFixturesPassed = true;
 
-  expectedTables.forEach(table => {
+  for (const table of expectedTables) {
     const rlsRegex = new RegExp(`ALTER\\s+TABLE\\s+public\\.${table}\\s+ENABLE\\s+ROW\\s+LEVEL\\s+SECURITY`, 'i');
     const enabled = rlsRegex.test(allSql);
     const expected = rlsContracts[table] || [];
-    const policyResult = validateTableRlsPolicies(table, allSql, expected);
+    const policyResult = await validateTableRlsPolicies(table, allSql, expected);
     if (!policyResult.valid) {
       console.log(`RLS TABLE ${table} FAILED:`, policyResult.error);
     }
@@ -630,9 +696,9 @@ async function runPhase01Verification() {
       'RLS Policies',
       `RLS-${table.toUpperCase()}`,
       `RLS Enabled on public.${table}`,
-      policyResult.error ? `FAILED: ${policyResult.error}` : `Verified ENABLE ROW LEVEL SECURITY and validated ${expected.length} static migration policy definition(s): ${policySummary}; 6 negative fixtures verified rejecting missing/malformed/excess-role policies (static contract check, not runtime authorization)`
+      policyResult.error ? `FAILED: ${policyResult.error}` : `Verified ENABLE ROW LEVEL SECURITY and validated ${expected.length} static migration policy definition(s): ${policySummary}; AST predicate safety & positive/negative fixtures verified`
     );
-  });
+  }
 
   // ---------------------------------------------------------
   // SUITE 5: Preflight Validation Script Contract Parity

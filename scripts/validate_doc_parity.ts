@@ -108,8 +108,16 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
   // Recompute summary quantities independently from authoritative requirement records
   const computedTotalRequirements = manifestReqCount;
   
-  // Derivation Rule 1: staticContractPassed counts requirements that have valid testId and have passed static verification (all valid requirements)
-  const computedStaticContractPassed = (manifest.requirements || []).filter((r: any) => r.testId).length;
+  // Derivation Rule 1: staticContractPassed counts requirements with valid active test references AND verified passing evidence (non-empty evidence and accepted status)
+  const computedStaticContractPassed = (manifest.requirements || []).filter((r: any) => 
+    r.testId && 
+    typeof r.testId === 'string' &&
+    r.testId.trim().length > 0 &&
+    r.expectedEvidence &&
+    typeof r.expectedEvidence === 'string' &&
+    r.expectedEvidence.trim().length > 0 &&
+    (r.acceptanceStatus === 'ACCEPTED_STATIC_CONTRACT' || r.acceptanceStatus === 'LOCAL_VERIFIED')
+  ).length;
 
   // Derivation Rule 2: runtimeCloudScheduled counts requirements with live_runtime, automated, or REV static audit requirements scheduled for cloud/runtime gates
   const computedRuntimeCloudScheduled = (manifest.requirements || []).filter((r: any) => 
@@ -198,6 +206,10 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
       if (!req[f] || (typeof req[f] === 'string' && req[f].trim().length === 0)) {
         errors.push(`Requirement '${req.id}' missing required field: '${f}'`);
       }
+    }
+
+    if (req.acceptanceStatus === 'FAILED') {
+      errors.push(`Requirement '${req.id}' validation failure: acceptanceStatus cannot be 'FAILED'`);
     }
 
     // Legitimacy of verification tiers
@@ -545,6 +557,40 @@ export function runDocParityNegativeFixtures(): void {
     throw new Error('Negative Fixture 11 FAILED: Validator did not reject premature production certification');
   }
   console.log('  [PASS] Negative Fixture 11: Successfully rejected premature production certification');
+
+  // Negative Fixture 12: Failed test status in requirement
+  const brokenManifestFailedTest = {
+    ...canonicalManifest,
+    requirements: [
+      {
+        ...canonicalManifest.requirements[0],
+        acceptanceStatus: 'FAILED'
+      },
+      ...canonicalManifest.requirements.slice(1)
+    ]
+  };
+  const res12 = validateDocParity({ _mockManifestContent: brokenManifestFailedTest });
+  if (res12.success || !res12.errors.some(e => e.includes("acceptanceStatus cannot be 'FAILED'"))) {
+    throw new Error('Negative Fixture 12 FAILED: Validator did not reject requirement with FAILED acceptance status');
+  }
+  console.log('  [PASS] Negative Fixture 12: Successfully rejected requirement with FAILED test status');
+
+  // Negative Fixture 13: Missing verification evidence
+  const brokenManifestMissingEvidence = {
+    ...canonicalManifest,
+    requirements: [
+      {
+        ...canonicalManifest.requirements[0],
+        expectedEvidence: ''
+      },
+      ...canonicalManifest.requirements.slice(1)
+    ]
+  };
+  const res13 = validateDocParity({ _mockManifestContent: brokenManifestMissingEvidence });
+  if (res13.success || !res13.errors.some(e => e.includes("missing required field: 'expectedEvidence'"))) {
+    throw new Error('Negative Fixture 13 FAILED: Validator did not reject requirement with missing verification evidence');
+  }
+  console.log('  [PASS] Negative Fixture 13: Successfully rejected requirement with missing verification evidence');
 }
 
 export function runCli(): void {
