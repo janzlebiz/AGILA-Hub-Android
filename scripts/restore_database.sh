@@ -103,6 +103,12 @@ READ_HASH=$(awk '{print $1}' "$CHECKSUM_FILE")
 READ_FILENAME=$(awk '{print $2}' "$CHECKSUM_FILE" | sed 's/^[ *]//')
 EXPECTED_BASENAME=$(basename "$BACKUP_FILE")
 
+# Validate SHA-256 hash format (exactly 64 hexadecimal characters)
+if ! [[ "$READ_HASH" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "FATAL: Checksum hash format invalid ('$READ_HASH'). Expected exactly 64 hexadecimal characters." >&2
+    exit 1
+fi
+
 # Reject mismatched filename in checksum sidecar
 if [ "$READ_FILENAME" != "$EXPECTED_BASENAME" ]; then
     echo "FATAL: Checksum file filename mismatch! Referenced file '$READ_FILENAME' does not match target backup '$EXPECTED_BASENAME'." >&2

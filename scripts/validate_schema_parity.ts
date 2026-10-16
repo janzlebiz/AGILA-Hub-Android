@@ -148,6 +148,11 @@ export async function validateSchemaParity(migrationsDir: string = 'supabase/mig
           unsupportedConstructsDetected.push(`CREATE MATERIALIZED VIEW ${relName}`);
           continue;
         }
+        if (EXPECTED_CORE_TABLES.includes(relName)) {
+          errors.push(`[${file}] Core table '${relName}' declared using CREATE TABLE AS. Core tables require permanent base tables and cannot be satisfied by CREATE TABLE AS.`);
+          unsupportedConstructsDetected.push(`CREATE TABLE AS core table ${relName}`);
+          continue;
+        }
         isTableCreation = true;
         if (!rel || !rel.relname) {
           errors.push(`[${file}] Encountered CREATE TABLE AS with missing relation name. Failing closed.`);
@@ -322,6 +327,20 @@ export async function runSchemaParityNegativeFixtures(): Promise<{ fixtureName: 
     details: `Success: ${res6.success}, Errors: ${res6.errors.join(' | ')}`
   });
   cleanupTestDir(testDir6);
+
+  // Fixture 6b: CREATE TABLE AS attempting to declare core table 'members'
+  const testDir6b = 'supabase/migrations_neg_test_cta_core';
+  setupTestDir(testDir6b);
+  const ctaCoreFile = path.join(testDir6b, '20261013000014_cta_members.sql');
+  fs.writeFileSync(ctaCoreFile, 'CREATE TABLE members AS SELECT 1 AS id;');
+  const res6b = await validateSchemaParity(testDir6b);
+  const f6bPassed = !res6b.success && res6b.errors.some(e => e.includes("Core table 'members' declared using CREATE TABLE AS"));
+  fixtureResults.push({
+    fixtureName: 'CREATE TABLE AS Core Table Declaration Rejected',
+    passed: f6bPassed,
+    details: `Success: ${res6b.success}, Errors: ${res6b.errors.join(' | ')}`
+  });
+  cleanupTestDir(testDir6b);
 
   // Fixture 7: Materialized View substitution cannot satisfy core table requirement
   const testDir7 = 'supabase/migrations_neg_test_matview';
