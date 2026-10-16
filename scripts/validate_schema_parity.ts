@@ -3,6 +3,9 @@ import path from 'path';
 
 export interface SchemaValidationResult {
   success: boolean;
+  totalMigrationsInspected: number;
+  allMigrationsFound: string[];
+  requiredMigrationsVerified: string[];
   tableCount: number;
   tablesVerified: string[];
   columnsVerified: string[];
@@ -57,11 +60,14 @@ export const SUPPORTED_SQL_CONSTRUCTS = [
 ];
 
 export const UNVERIFIED_SCHEMA_DIMENSIONS = [
+  'Live Database Authorization & Role Permissions (Deferred: requires live cloud PostgreSQL with pg_roles/privileges)',
   'Runtime Database Constraints: Live foreign key referential integrity enforcement on mutated rows',
   'Runtime Triggers: Trigger execution order and procedural state modifications inside PL/pgSQL',
+  'PL/pgSQL Procedural Compilation: Server-side validation via plpgsql_check (Deferred: requires connected PostgreSQL engine)',
   'Dynamic SQL Statements: SQL queries executed via EXECUTE format(...) within procedural functions',
   'Storage Object Policies: Supabase storage.objects RLS and MIME type enforcement',
-  'Live Auth Gateway Invariants: Supabase GoTrue JWT claims, token revocation, and session states'
+  'Live Auth Gateway Invariants: Supabase GoTrue JWT claims, token revocation, and session states',
+  'Production Certification: Production deployment readiness certification (Deferred to Phase 07)'
 ];
 
 export function validateSchemaParity(options?: SchemaValidationOptions): SchemaValidationResult {
@@ -69,16 +75,21 @@ export function validateSchemaParity(options?: SchemaValidationOptions): SchemaV
   const tablesVerified: string[] = [];
   const columnsVerified: string[] = [];
   const indexesVerified: string[] = [];
+  const requiredMigrationsVerified: string[] = [];
+  const allMigrationsFound: string[] = [];
 
-  // 1. Load & Validate Migration Files
+  // 1. Load & Validate Migration Files (Every SQL file in supabase/migrations is inspected)
   let migrationFilesContent: Record<string, string> = {};
 
   if (options?._mockMigrationsContent) {
     migrationFilesContent = options._mockMigrationsContent;
-    // Verify that every required migration is present in the mock
+    allMigrationsFound.push(...Object.keys(migrationFilesContent).sort());
+    // Verify that every required baseline migration is present in the mock
     for (const reqMigration of REQUIRED_MIGRATIONS) {
       if (!migrationFilesContent[reqMigration]) {
-        errors.push(`Missing required migration file: ${reqMigration}`);
+        errors.push(`Missing required baseline migration file: ${reqMigration}`);
+      } else {
+        requiredMigrationsVerified.push(reqMigration);
       }
     }
   } else {
@@ -86,21 +97,32 @@ export function validateSchemaParity(options?: SchemaValidationOptions): SchemaV
     if (!fs.existsSync(migrationsDir)) {
       throw new Error(`Migrations directory not found: ${migrationsDir}`);
     }
+
+    const dirEntries = fs.readdirSync(migrationsDir);
+    const sqlFiles = dirEntries.filter(f => f.endsWith('.sql')).sort();
+    allMigrationsFound.push(...sqlFiles);
+
+    // Verify all nine required baseline migrations exist in the directory
     for (const reqMigration of REQUIRED_MIGRATIONS) {
-      const fullPath = path.join(migrationsDir, reqMigration);
-      if (!fs.existsSync(fullPath)) {
-        errors.push(`Missing required migration file: ${reqMigration} (at ${fullPath})`);
-        continue;
+      if (!sqlFiles.includes(reqMigration)) {
+        errors.push(`Missing required baseline migration file: ${reqMigration} (expected at ${path.join(migrationsDir, reqMigration)})`);
+      } else {
+        requiredMigrationsVerified.push(reqMigration);
       }
+    }
+
+    // Inspect every SQL file in supabase/migrations, not only the nine required filenames
+    for (const sqlFile of sqlFiles) {
+      const fullPath = path.join(migrationsDir, sqlFile);
       try {
         const content = fs.readFileSync(fullPath, 'utf-8');
         if (content.trim().length === 0) {
-          errors.push(`Required migration file is empty: ${reqMigration}`);
+          errors.push(`Migration file is empty: ${sqlFile}`);
           continue;
         }
-        migrationFilesContent[reqMigration] = content;
+        migrationFilesContent[sqlFile] = content;
       } catch (err: any) {
-        errors.push(`Required migration file is unreadable: ${reqMigration} (${err.message})`);
+        errors.push(`Migration file is unreadable: ${sqlFile} (${err.message})`);
       }
     }
   }
@@ -124,24 +146,28 @@ export function validateSchemaParity(options?: SchemaValidationOptions): SchemaV
   }
 
   // 3. Fail Closed on Genuinely Unsupported SQL Constructs in Input
-  // (e.g. Dynamic DDL execution, table partitioning outside supported static model)
+  // If the validator cannot safely inspect a file or SQL construct, fail closed or explicitly report that limitation.
   const unsupportedConstructPatterns = [
     { pattern: /PARTITION\s+BY\s+(?:HASH|RANGE|LIST)/i, name: 'Table Partitioning (PARTITION BY)' },
     { pattern: /EXECUTE\s+(?:format\s*\(|'CREATE\s+TABLE)/i, name: 'Dynamic DDL in procedural block (EXECUTE format/CREATE)' },
-    { pattern: /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?!public\.)[a-z0-9_]+\.[a-z0-9_]+/i, name: 'Non-public schema table declaration' }
+    { pattern: /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?!public\.)[a-z0-9_]+\.[a-z0-9_]+/i, name: 'Non-public schema table declaration' },
+    { pattern: /INHERITS\s*\(/i, name: 'Table Inheritance (INHERITS)' },
+    { pattern: /CREATE\s+FOREIGN\s+TABLE/i, name: 'Foreign Table (CREATE FOREIGN TABLE)' }
   ];
 
   for (const [filename, content] of Object.entries(migrationFilesContent)) {
     for (const uc of unsupportedConstructPatterns) {
       if (uc.pattern.test(content)) {
-        errors.push(`Unsupported SQL construct encountered in '${filename}': Offline static validator cannot reliably analyze '${uc.name}'. Live database validation required.`);
+        errors.push(
+          `Unsupported SQL construct encountered in '${filename}': Offline static validator cannot safely inspect '${uc.name}'. Fail-closed constraint triggered; full schema parity cannot be claimed without live database verification.`
+        );
       }
     }
   }
 
-  // 4. Extract and Validate Table Declarations Across Migrations
+  // 4. Extract and Validate Table Declarations Across All Migrations (Required and Additional)
   // Extract individual table blocks: CREATE TABLE [IF NOT EXISTS] public.<name> ( ... );
-  const tableBlockRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?public\.([a-z_]+)\s*\(([\s\S]*?)\);/gi;
+  const tableBlockRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?public\.([a-z0-9_]+)\s*\(([\s\S]*?)\);/gi;
   const migrationTablesDeclared = new Map<string, { filename: string; blockContent: string }>();
   const duplicateTables = new Set<string>();
 
@@ -165,7 +191,7 @@ export function validateSchemaParity(options?: SchemaValidationOptions): SchemaV
     }
   }
 
-  // Check for unexpected public tables in migrations
+  // Check for unexpected/unauthorized public tables in all migration files
   for (const [tableName, meta] of migrationTablesDeclared.entries()) {
     if (!EXPECTED_CORE_TABLES.includes(tableName)) {
       errors.push(`Unexpected table declared in migrations: 'public.${tableName}' (in ${meta.filename})`);
@@ -329,6 +355,9 @@ export function validateSchemaParity(options?: SchemaValidationOptions): SchemaV
 
   return {
     success: errors.length === 0,
+    totalMigrationsInspected: allMigrationsFound.length,
+    allMigrationsFound,
+    requiredMigrationsVerified,
     tableCount: tablesVerified.length,
     tablesVerified,
     columnsVerified,
@@ -350,20 +379,19 @@ export function runSchemaParityNegativeFixtures(): void {
   }
   const canonicalPreflight = fs.readFileSync(path.resolve('scripts/preflight_schema_check.sql'), 'utf-8');
 
-  // Negative Fixture 1: Missing Required Migration
+  // Negative Fixture 1: Missing Required Baseline Migration
   const brokenMigrationsMissingOne = { ...canonicalMigrations };
   delete brokenMigrationsMissingOne['20261013000003_invitations_and_auth.sql'];
   const res1 = validateSchemaParity({
     _mockMigrationsContent: brokenMigrationsMissingOne,
     _mockPreflightContent: canonicalPreflight
   });
-  if (res1.success || !res1.errors.some(e => e.includes('Missing required migration file: 20261013000003_invitations_and_auth.sql'))) {
-    throw new Error('Negative Fixture 1 FAILED: Validator did not reject missing required migration file');
+  if (res1.success || !res1.errors.some(e => e.includes('Missing required baseline migration file: 20261013000003_invitations_and_auth.sql'))) {
+    throw new Error('Negative Fixture 1 FAILED: Validator did not reject missing required baseline migration file');
   }
-  console.log('  [PASS] Negative Fixture 1: Successfully rejected missing required migration file');
+  console.log('  [PASS] Negative Fixture 1: Successfully rejected missing required baseline migration file');
 
-  // Negative Fixture 2: Altered Table Declaration (Duplicate & Unexpected)
-  // 2a. Duplicate table
+  // Negative Fixture 2a: Duplicate Core Table Declaration Across Migrations
   const brokenMigrationsDuplicateTable = {
     ...canonicalMigrations,
     '20261013000003_invitations_and_auth.sql': canonicalMigrations['20261013000003_invitations_and_auth.sql'] +
@@ -378,7 +406,7 @@ export function runSchemaParityNegativeFixtures(): void {
   }
   console.log('  [PASS] Negative Fixture 2a: Successfully rejected duplicate core table declaration across migrations');
 
-  // 2b. Unexpected table
+  // Negative Fixture 2b: Unexpected Core Table in an Existing Migration
   const brokenMigrationsUnexpectedTable = {
     ...canonicalMigrations,
     '20261013000003_invitations_and_auth.sql': canonicalMigrations['20261013000003_invitations_and_auth.sql'] +
@@ -391,7 +419,27 @@ export function runSchemaParityNegativeFixtures(): void {
   if (res2b.success || !res2b.errors.some(e => e.includes("Unexpected table declared in migrations: 'public.unauthorized_backdoor'"))) {
     throw new Error('Negative Fixture 2b FAILED: Validator did not reject unexpected table declaration');
   }
-  console.log('  [PASS] Negative Fixture 2b: Successfully rejected unexpected table declaration outside core baseline');
+  console.log('  [PASS] Negative Fixture 2b: Successfully rejected unexpected table declaration in existing migration');
+
+  // Negative Fixture 2c: Placing an Unauthorized Table in an Additional Migration File
+  const brokenMigrationsAdditionalFile = {
+    ...canonicalMigrations,
+    '20261014000010_additional_feature.sql':
+      '-- Additional unapproved migration file\nCREATE TABLE public.unauthorized_extra_table (id UUID PRIMARY KEY);\n'
+  };
+  const res2c = validateSchemaParity({
+    _mockMigrationsContent: brokenMigrationsAdditionalFile,
+    _mockPreflightContent: canonicalPreflight
+  });
+  if (
+    res2c.success ||
+    !res2c.errors.some(e =>
+      e.includes("Unexpected table declared in migrations: 'public.unauthorized_extra_table' (in 20261014000010_additional_feature.sql)")
+    )
+  ) {
+    throw new Error('Negative Fixture 2c FAILED: Validator did not reject unauthorized table in additional migration file');
+  }
+  console.log('  [PASS] Negative Fixture 2c: Successfully rejected unauthorized table placed in an additional migration file');
 
   // Negative Fixture 3: Misplaced or Mismatched Column/Index Contract
   // 3a. Misplaced column (actor_type declared on announcements instead of audit_logs)
@@ -432,7 +480,7 @@ export function runSchemaParityNegativeFixtures(): void {
   }
   console.log('  [PASS] Negative Fixture 3b: Successfully rejected index bound to incorrect table target');
 
-  // Negative Fixture 4: Genuinely Unsupported SQL Construct Encountered in Real Input (NO test boolean flag!)
+  // Negative Fixture 4: Genuinely Unsupported SQL Construct Encountered in Real Input (PARTITION BY)
   const brokenMigrationsUnsupportedConstruct = {
     ...canonicalMigrations,
     '20261013000001_core_types_and_extensions.sql': canonicalMigrations['20261013000001_core_types_and_extensions.sql'] +
@@ -496,11 +544,12 @@ export function runCli(): void {
 
   console.log('\nUnverified Schema Dimensions (Deferred to Live Database / Phase 02):');
   for (const u of result.unverifiedDimensions) {
-    console.log(`  * [NOT EXECUTED] ${u}`);
+    console.log(`  * [NOT EXECUTED / NOT CERTIFIED] ${u}`);
   }
 
-  console.log('\n[Parity Check 1] Core Table Coverage:');
-  console.log(`  Required Migrations Verified: ${REQUIRED_MIGRATIONS.length} / ${REQUIRED_MIGRATIONS.length} (PASS)`);
+  console.log('\n[Parity Check 1] Core Table Coverage & Migration Inventory:');
+  console.log(`  Total SQL Migration Files Inspected: ${result.totalMigrationsInspected}`);
+  console.log(`  Required Baseline Migrations Verified: ${result.requiredMigrationsVerified.length} / ${REQUIRED_MIGRATIONS.length} (PASS)`);
   console.log(`  Expected Core Tables: ${EXPECTED_CORE_TABLES.length}`);
   console.log(`  Verified in Migrations & Preflight: ${result.tableCount}`);
   for (const t of result.tablesVerified) {
@@ -527,8 +576,10 @@ export function runCli(): void {
 
   console.log('\n================================================================');
   console.log('   TARGETED STATIC SCHEMA VALIDATION: PASSED (100%)             ');
-  console.log('   (Note: Static offline analysis; live database verification   ');
-  console.log('    remains explicitly NOT EXECUTED pending Phase 02)           ');
+  console.log('   (Note: Targeted offline static analysis only — not full       ');
+  console.log('    schema parity. Live database authorization, PL/pgSQL runtime');
+  console.log('    compilation, and production certification remain explicitly  ');
+  console.log('    marked NOT EXECUTED / NOT CERTIFIED)                         ');
   console.log('================================================================');
 }
 

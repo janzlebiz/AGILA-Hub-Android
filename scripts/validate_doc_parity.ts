@@ -14,6 +14,7 @@ export interface DocValidationOptions {
   _mockPlanContent?: string;
   _mockAppContent?: string;
   _mockManifestContent?: any;
+  _mockActiveTestIds?: string[];
   _mockMissingDocKey?: string;
 }
 
@@ -46,12 +47,24 @@ export const REQUIRED_DOCUMENTS: RequiredDocConfig[] = [
   }
 ];
 
+// -----------------------------------------------------------------------------
+// Authoritative Baseline Contracts vs Manifest-Derived Quantities
+// -----------------------------------------------------------------------------
+// The Phase 01 baseline contract establishes fixed, immutable invariants:
+// 76 unique assertions across 13 granular suites grouped into 8 functional domains.
+// Dynamic requirements tracking and phase progress are derived from requirements_manifest.json.
+export const IMMUTABLE_PHASE01_CONTRACT = {
+  assertionCount: 76,
+  granularSuiteCount: 13,
+  functionalDomainCount: 8,
+} as const;
+
 export function validateDocParity(options?: DocValidationOptions): DocValidationResult {
   const errors: string[] = [];
   const documentsChecked: string[] = [];
   let assertionsVerified = 0;
 
-  // 1. Load & Validate Authoritative Manifest
+  // 1. Load Authoritative Requirements Manifest
   let manifest: any;
   if (options?._mockManifestContent) {
     manifest = options._mockManifestContent;
@@ -67,28 +80,56 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
     manifest = JSON.parse(rawManifest);
   }
 
-  // Derive Authoritative Quantities from Manifest (Zero hardcoded mutable counts)
+  // 1a. Load Active Canonical Test IDs for Referential Integrity Verification
+  let activeTestIds: Set<string>;
+  if (options?._mockActiveTestIds) {
+    activeTestIds = new Set(options._mockActiveTestIds);
+  } else {
+    const resultsPath = path.resolve('scripts/phase01_test_results.json');
+    if (!fs.existsSync(resultsPath)) {
+      throw new Error(`Canonical test results file not found for test ID verification: ${resultsPath}`);
+    }
+    const rawResults = fs.readFileSync(resultsPath, 'utf-8');
+    if (rawResults.trim().length === 0) {
+      throw new Error(`Canonical test results file is empty: ${resultsPath}`);
+    }
+    const resultsList = JSON.parse(rawResults);
+    activeTestIds = new Set(resultsList.map((r: any) => r.id));
+  }
+
+  // 1b. Manifest-Derived Quantities & Baseline Contract Verification
   const totalReqs: number = manifest.summary?.totalRequirements ?? 0;
+  const manifestReqCount = Array.isArray(manifest.requirements) ? manifest.requirements.length : 0;
   const assertionCount: number = manifest.summary?.assertionCount ?? 0;
   const suiteCount: number = manifest.summary?.granularSuiteCount ?? 0;
   const domainCount: number = manifest.summary?.functionalDomainCount ?? 0;
   const cloudScheduled: number = manifest.summary?.runtimeCloudScheduled ?? 0;
 
-  // Validate internal manifest consistency
-  if (totalReqs !== (manifest.requirements?.length ?? 0)) {
-    errors.push(`Manifest internal discrepancy: summary.totalRequirements (${totalReqs}) != requirements.length (${manifest.requirements?.length})`);
-  }
-  if (assertionCount !== 76) {
-    errors.push(`Manifest internal discrepancy: expected 76 assertions, found ${assertionCount}`);
-  }
-  if (suiteCount !== 13) {
-    errors.push(`Manifest internal discrepancy: expected 13 granular suites, found ${suiteCount}`);
-  }
-  if (domainCount !== 8) {
-    errors.push(`Manifest internal discrepancy: expected 8 functional domains, found ${domainCount}`);
+  // Manifest internal count consistency: summary count must match requirements list length
+  if (totalReqs !== manifestReqCount) {
+    errors.push(
+      `Manifest internal count inconsistency: summary.totalRequirements (${totalReqs}) does not match requirements array length (${manifestReqCount})`
+    );
   }
 
-  // Validate all requirements have unique IDs, required fields, and valid test references
+  // Immutable baseline contract verification: manifest values must match immutable baseline contract
+  if (assertionCount !== IMMUTABLE_PHASE01_CONTRACT.assertionCount) {
+    errors.push(
+      `Manifest baseline contract violation: summary.assertionCount (${assertionCount}) does not match immutable baseline contract (${IMMUTABLE_PHASE01_CONTRACT.assertionCount})`
+    );
+  }
+  if (suiteCount !== IMMUTABLE_PHASE01_CONTRACT.granularSuiteCount) {
+    errors.push(
+      `Manifest baseline contract violation: summary.granularSuiteCount (${suiteCount}) does not match immutable baseline contract (${IMMUTABLE_PHASE01_CONTRACT.granularSuiteCount})`
+    );
+  }
+  if (domainCount !== IMMUTABLE_PHASE01_CONTRACT.functionalDomainCount) {
+    errors.push(
+      `Manifest baseline contract violation: summary.functionalDomainCount (${domainCount}) does not match immutable baseline contract (${IMMUTABLE_PHASE01_CONTRACT.functionalDomainCount})`
+    );
+  }
+
+  // Validate all requirements have unique IDs, required fields, and active test references
   const seenReqIds = new Set<string>();
   for (const req of (manifest.requirements || [])) {
     if (!req.id || typeof req.id !== 'string') {
@@ -101,7 +142,19 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
     seenReqIds.add(req.id);
 
     // Required fields check
-    const requiredFields = ['title', 'applicability', 'severity', 'acceptanceStatus', 'implementationLocation', 'verificationMethod', 'testId', 'expectedEvidence', 'verificationTier', 'liveExecutionStatus', 'certificationStatus'];
+    const requiredFields = [
+      'title',
+      'applicability',
+      'severity',
+      'acceptanceStatus',
+      'implementationLocation',
+      'verificationMethod',
+      'testId',
+      'expectedEvidence',
+      'verificationTier',
+      'liveExecutionStatus',
+      'certificationStatus'
+    ];
     for (const f of requiredFields) {
       if (!req[f] || (typeof req[f] === 'string' && req[f].trim().length === 0)) {
         errors.push(`Requirement '${req.id}' missing required field: '${f}'`);
@@ -124,10 +177,30 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
       }
     }
 
-    // Validate requirement-to-test reference
+    // Validate requirement-to-test reference against actual active test IDs
     if (req.verificationTier === 'automated' || req.verificationTier === 'static') {
-      if (!req.testId || req.testId === 'NOT_APPLICABLE_DEFERRED') {
-        errors.push(`Requirement '${req.id}' error: static/automated requirement must reference active test IDs, got '${req.testId}'`);
+      if (!req.testId || typeof req.testId !== 'string' || req.testId.trim().length === 0 || req.testId === 'NOT_APPLICABLE_DEFERRED') {
+        errors.push(`Requirement '${req.id}' error: static/automated requirement must reference an active primary testId, got '${req.testId}'`);
+      } else if (!activeTestIds.has(req.testId)) {
+        errors.push(`Requirement '${req.id}' error: static/automated requirement references unknown or inactive test ID '${req.testId}'`);
+      }
+
+      // Support multiple IDs only if the manifest schema defines them (req.testIds array)
+      if (req.testIds !== undefined) {
+        if (!Array.isArray(req.testIds)) {
+          errors.push(`Requirement '${req.id}' schema error: 'testIds' must be an array of test ID strings`);
+        } else {
+          for (const tid of req.testIds) {
+            if (typeof tid !== 'string' || tid.trim().length === 0) {
+              errors.push(`Requirement '${req.id}' schema error: 'testIds' contains invalid or empty test ID entry`);
+            } else if (!activeTestIds.has(tid)) {
+              errors.push(`Requirement '${req.id}' error: static/automated requirement references unknown or inactive test ID '${tid}' in 'testIds'`);
+            }
+          }
+          if (req.testId && !req.testIds.includes(req.testId)) {
+            errors.push(`Requirement '${req.id}' error: primary testId '${req.testId}' is missing from defined testIds array`);
+          }
+        }
       }
     }
   }
@@ -178,7 +251,7 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
     errors.push(`Checked document set mismatch: expected ${REQUIRED_DOCUMENTS.length} documents, only ${documentsChecked.length} were successfully verified`);
   }
 
-  // 3. Document Parity Checks (Derived dynamically from manifest)
+  // 3. Document Parity Checks (Derived dynamically from manifest & baseline contract)
 
   // Document A: phase00_verification_matrix.md
   const matrixContent = docContents['matrix'];
@@ -324,7 +397,7 @@ export function runDocParityNegativeFixtures(): void {
 
   // Negative Fixture 6: Missing test reference or invalid tier in manifest
   const canonicalManifest = JSON.parse(fs.readFileSync(path.resolve('scripts/requirements_manifest.json'), 'utf-8'));
-  const brokenManifest = {
+  const brokenManifestMissingTest = {
     ...canonicalManifest,
     requirements: [
       ...canonicalManifest.requirements.slice(1),
@@ -334,11 +407,67 @@ export function runDocParityNegativeFixtures(): void {
       }
     ]
   };
-  const res6 = validateDocParity({ _mockManifestContent: brokenManifest });
-  if (res6.success || !res6.errors.some(e => e.includes("missing required field: 'testId'"))) {
+  const res6 = validateDocParity({ _mockManifestContent: brokenManifestMissingTest });
+  if (res6.success || !res6.errors.some(e => e.includes("missing required field: 'testId'") || e.includes('must reference an active primary testId'))) {
     throw new Error('Negative Fixture 6 FAILED: Validator did not catch requirement with missing test reference');
   }
   console.log('  [PASS] Negative Fixture 6: Successfully caught requirement missing test reference in manifest');
+
+  // Negative Fixture 7: Unknown or inactive test ID in static/automated requirement
+  const brokenManifestUnknownTest = {
+    ...canonicalManifest,
+    requirements: [
+      {
+        ...canonicalManifest.requirements[0],
+        testId: 'NONEXISTENT-TEST-ID-999',
+        testIds: ['NONEXISTENT-TEST-ID-999']
+      },
+      ...canonicalManifest.requirements.slice(1)
+    ]
+  };
+  const res7 = validateDocParity({ _mockManifestContent: brokenManifestUnknownTest });
+  if (res7.success || !res7.errors.some(e => e.includes("references unknown or inactive test ID 'NONEXISTENT-TEST-ID-999'"))) {
+    throw new Error('Negative Fixture 7 FAILED: Validator did not reject requirement with unknown test ID');
+  }
+  console.log('  [PASS] Negative Fixture 7: Successfully rejected requirement referencing unknown or inactive test ID');
+
+  // Negative Fixture 8: Inconsistent manifest count (summary.totalRequirements != requirements.length)
+  const brokenManifestInconsistentTotal = {
+    ...canonicalManifest,
+    summary: {
+      ...canonicalManifest.summary,
+      totalRequirements: 99 // Inconsistent with requirements array length of 22
+    }
+  };
+  const res8 = validateDocParity({ _mockManifestContent: brokenManifestInconsistentTotal });
+  if (
+    res8.success ||
+    !res8.errors.some(e =>
+      e.includes('Manifest internal count inconsistency: summary.totalRequirements (99) does not match requirements array length (22)')
+    )
+  ) {
+    throw new Error('Negative Fixture 8 FAILED: Validator did not reject inconsistent totalRequirements count in manifest');
+  }
+  console.log('  [PASS] Negative Fixture 8: Successfully rejected manifest with internal count inconsistency (99 vs 22)');
+
+  // Negative Fixture 9: Inconsistent manifest baseline contract count (assertionCount != 76)
+  const brokenManifestContractDiscrepancy = {
+    ...canonicalManifest,
+    summary: {
+      ...canonicalManifest.summary,
+      assertionCount: 75 // Violates immutable Phase 01 baseline contract of 76
+    }
+  };
+  const res9 = validateDocParity({ _mockManifestContent: brokenManifestContractDiscrepancy });
+  if (
+    res9.success ||
+    !res9.errors.some(e =>
+      e.includes('Manifest baseline contract violation: summary.assertionCount (75) does not match immutable baseline contract (76)')
+    )
+  ) {
+    throw new Error('Negative Fixture 9 FAILED: Validator did not reject manifest violating immutable baseline contract count');
+  }
+  console.log('  [PASS] Negative Fixture 9: Successfully rejected manifest violating immutable baseline contract assertion count (75 vs 76)');
 }
 
 export function runCli(): void {
@@ -368,7 +497,9 @@ export function runCli(): void {
 
   console.log('\n================================================================');
   console.log('   DOCUMENTATION PARITY VALIDATION: PASSED (100%)               ');
-  console.log('   (Manifest, matrices, traceability, and UI are fully aligned) ');
+  console.log('   (Manifest, matrices, traceability, and UI are fully aligned; ');
+  console.log('    Live database authorization, PL/pgSQL runtime compilation,  ');
+  console.log('    and production certification: NOT EXECUTED / NOT CERTIFIED)  ');
   console.log('================================================================');
 }
 
