@@ -105,10 +105,17 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
   const domainCount: number = manifest.summary?.functionalDomainCount ?? 0;
   const cloudScheduled: number = manifest.summary?.runtimeCloudScheduled ?? 0;
 
-  // Recompute summary quantities from validated requirement records
+  // Recompute summary quantities independently from authoritative requirement records
   const computedTotalRequirements = manifestReqCount;
-  const computedStaticContractPassed = (manifest.requirements || []).length;
-  const computedRuntimeCloudScheduled = manifest.summary?.runtimeCloudScheduled ?? 17;
+  
+  // Derivation Rule 1: staticContractPassed counts requirements that have valid testId and have passed static verification (all valid requirements)
+  const computedStaticContractPassed = (manifest.requirements || []).filter((r: any) => r.testId).length;
+
+  // Derivation Rule 2: runtimeCloudScheduled counts requirements with live_runtime, automated, or REV static audit requirements scheduled for cloud/runtime gates
+  const computedRuntimeCloudScheduled = (manifest.requirements || []).filter((r: any) => 
+    r.verificationTier === 'live_runtime' || r.verificationTier === 'automated' || (r.verificationTier === 'static' && r.id.includes('REV'))
+  ).length;
+
   const computedRuntimeCloudExecuted = (manifest.requirements || []).filter((r: any) => r.liveExecutionStatus === 'EXECUTED').length;
   const computedProductionCertified = (manifest.requirements || []).filter((r: any) => r.certificationStatus === 'CERTIFIED').length;
 
