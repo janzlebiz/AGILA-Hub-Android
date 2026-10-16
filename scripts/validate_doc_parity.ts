@@ -15,6 +15,7 @@ export interface DocValidationOptions {
   _mockAppContent?: string;
   _mockManifestContent?: any;
   _mockActiveTestIds?: string[];
+  _mockTestResults?: any[];
   _mockMissingDocKey?: string;
 }
 
@@ -80,9 +81,15 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
     manifest = JSON.parse(rawManifest);
   }
 
-  // 1a. Load Active Canonical Test IDs for Referential Integrity Verification
+  // 1a. Load Active Canonical Test IDs & Test Execution Results
   let activeTestIds: Set<string>;
-  if (options?._mockActiveTestIds) {
+  const testResultsMap = new Map<string, any>();
+  if (options?._mockTestResults) {
+    for (const tr of options._mockTestResults) {
+      testResultsMap.set(tr.id, tr);
+    }
+    activeTestIds = options?._mockActiveTestIds ? new Set(options._mockActiveTestIds) : new Set(options._mockTestResults.map((r: any) => r.id));
+  } else if (options?._mockActiveTestIds) {
     activeTestIds = new Set(options._mockActiveTestIds);
   } else {
     const resultsPath = path.resolve('scripts/phase01_test_results.json');
@@ -95,6 +102,9 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
     }
     const resultsList = JSON.parse(rawResults);
     activeTestIds = new Set(resultsList.map((r: any) => r.id));
+    for (const tr of resultsList) {
+      testResultsMap.set(tr.id, tr);
+    }
   }
 
   // 1b. Manifest-Derived Quantities, Recomputation & Baseline Contract Verification
@@ -108,16 +118,20 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
   // Recompute summary quantities independently from authoritative requirement records
   const computedTotalRequirements = manifestReqCount;
   
-  // Derivation Rule 1: staticContractPassed counts requirements with valid active test references AND verified passing evidence (non-empty evidence and accepted status)
-  const computedStaticContractPassed = (manifest.requirements || []).filter((r: any) => 
-    r.testId && 
-    typeof r.testId === 'string' &&
-    r.testId.trim().length > 0 &&
-    r.expectedEvidence &&
-    typeof r.expectedEvidence === 'string' &&
-    r.expectedEvidence.trim().length > 0 &&
-    (r.acceptanceStatus === 'ACCEPTED_STATIC_CONTRACT' || r.acceptanceStatus === 'LOCAL_VERIFIED')
-  ).length;
+  // Derivation Rule 1: staticContractPassed counts requirements linked to active canonical test IDs with an actual passing result and required execution evidence, keeping descriptive expectedEvidence separate
+  const computedStaticContractPassed = (manifest.requirements || []).filter((r: any) => {
+    if (!r.testId || typeof r.testId !== 'string' || r.testId.trim().length === 0) return false;
+    if (!activeTestIds.has(r.testId)) return false;
+    if (!r.expectedEvidence || typeof r.expectedEvidence !== 'string' || r.expectedEvidence.trim().length === 0) return false;
+    if (r.acceptanceStatus !== 'ACCEPTED_STATIC_CONTRACT' && r.acceptanceStatus !== 'LOCAL_VERIFIED') return false;
+
+    const tr = testResultsMap.get(r.testId);
+    if (!tr) return false;
+    if (tr.status !== 'PASS') return false;
+    if (!tr.evidence || typeof tr.evidence !== 'string' || tr.evidence.trim().length === 0) return false;
+
+    return true;
+  }).length;
 
   // Derivation Rule 2: runtimeCloudScheduled counts requirements with live_runtime, automated, or REV static audit requirements scheduled for cloud/runtime gates
   const computedRuntimeCloudScheduled = (manifest.requirements || []).filter((r: any) => 
@@ -234,6 +248,15 @@ export function validateDocParity(options?: DocValidationOptions): DocValidation
         errors.push(`Requirement '${req.id}' error: static/automated requirement must reference an active primary testId, got '${req.testId}'`);
       } else if (!activeTestIds.has(req.testId)) {
         errors.push(`Requirement '${req.id}' error: static/automated requirement references unknown or inactive test ID '${req.testId}'`);
+      } else {
+        const tr = testResultsMap.get(req.testId);
+        if (!tr) {
+          errors.push(`Requirement '${req.id}' error: testId '${req.testId}' has no corresponding test execution result record (missing result)`);
+        } else if (tr.status !== 'PASS') {
+          errors.push(`Requirement '${req.id}' error: testId '${req.testId}' test execution result status is '${tr.status}' (failed result)`);
+        } else if (!tr.evidence || typeof tr.evidence !== 'string' || tr.evidence.trim().length === 0) {
+          errors.push(`Requirement '${req.id}' error: testId '${req.testId}' lacks required execution evidence (missing evidence)`);
+        }
       }
 
       // Support multiple IDs only if the manifest schema defines them (req.testIds array)
@@ -591,6 +614,39 @@ export function runDocParityNegativeFixtures(): void {
     throw new Error('Negative Fixture 13 FAILED: Validator did not reject requirement with missing verification evidence');
   }
   console.log('  [PASS] Negative Fixture 13: Successfully rejected requirement with missing verification evidence');
+
+  // Negative Fixture 14: Failed test execution result status
+  const res14 = validateDocParity({
+    _mockTestResults: [
+      { id: canonicalManifest.requirements[0].testId, status: 'FAIL', evidence: '' }
+    ]
+  });
+  if (res14.success || !res14.errors.some(e => e.includes("test execution result status is 'FAIL'"))) {
+    throw new Error('Negative Fixture 14 FAILED: Validator did not reject requirement with failed test execution status');
+  }
+  console.log('  [PASS] Negative Fixture 14: Successfully rejected requirement with failed test execution result status');
+
+  // Negative Fixture 15: Missing test execution result record
+  const res15 = validateDocParity({
+    _mockActiveTestIds: [canonicalManifest.requirements[0].testId],
+    _mockTestResults: []
+  });
+  if (res15.success || !res15.errors.some(e => e.includes('has no corresponding test execution result record'))) {
+    throw new Error('Negative Fixture 15 FAILED: Validator did not reject requirement with missing test result record');
+  }
+  console.log('  [PASS] Negative Fixture 15: Successfully rejected requirement with missing test result record');
+
+  // Negative Fixture 16: Missing execution evidence in test result
+  const res16 = validateDocParity({
+    _mockActiveTestIds: [canonicalManifest.requirements[0].testId],
+    _mockTestResults: [
+      { id: canonicalManifest.requirements[0].testId, status: 'PASS', evidence: '' }
+    ]
+  });
+  if (res16.success || !res16.errors.some(e => e.includes('lacks required execution evidence'))) {
+    throw new Error('Negative Fixture 16 FAILED: Validator did not reject requirement with missing execution evidence');
+  }
+  console.log('  [PASS] Negative Fixture 16: Successfully rejected requirement with missing execution evidence');
 }
 
 export function runCli(): void {

@@ -514,45 +514,77 @@ async function runPhase01Verification() {
           const parsedAst = await parse(`SELECT (${expr});`);
           let isUnsafe = false;
 
-          const walkAst = (node: any) => {
+          const walkAst = (node: any, inColumnComparison: boolean = false) => {
             if (!node || typeof node !== 'object') return;
 
-            // Check for literal boolean constant TRUE
+            let currentInColComp = inColumnComparison;
+
+            if (node.A_Expr) {
+              const name = node.A_Expr.name;
+              if (Array.isArray(name)) {
+                const op = name.map((n: any) => n.String?.sval).join('.');
+                const l = JSON.stringify(node.A_Expr.lexpr);
+                const r = JSON.stringify(node.A_Expr.rexpr);
+                if (op === '=' && l === r) {
+                  isUnsafe = true;
+                }
+                const hasColumnRef = (n: any): boolean => {
+                  if (!n || typeof n !== 'object') return false;
+                  if (n.ColumnRef) return true;
+                  return Object.keys(n).some(k => hasColumnRef(n[k]));
+                };
+                const hasConst = (n: any): boolean => {
+                  if (!n || typeof n !== 'object') return false;
+                  if (n.A_Const) return true;
+                  return Object.keys(n).some(k => hasConst(n[k]));
+                };
+                if ((hasColumnRef(node.A_Expr.lexpr) && hasConst(node.A_Expr.rexpr)) ||
+                    (hasColumnRef(node.A_Expr.rexpr) && hasConst(node.A_Expr.lexpr))) {
+                  currentInColComp = true;
+                }
+              }
+            }
+
+            // Check for literal boolean constant TRUE (exempting valid column comparisons)
             if (node.A_Const?.boolval?.boolval === true) {
-              isUnsafe = true;
+              if (!currentInColComp) {
+                isUnsafe = true;
+              }
             }
 
             // Check for BoolExpr (OR_EXPR)
             if (node.BoolExpr?.boolop === 'OR_EXPR' && Array.isArray(node.BoolExpr.args)) {
               for (const arg of node.BoolExpr.args) {
                 let argIsTrue = false;
-                const checkArg = (sub: any) => {
+                const checkArg = (sub: any, subColComp: boolean = false) => {
                   if (!sub || typeof sub !== 'object') return;
-                  if (sub.A_Const?.boolval?.boolval === true) argIsTrue = true;
-                  for (const k of Object.keys(sub)) checkArg(sub[k]);
+                  let subComp = subColComp;
+                  if (sub.A_Expr) {
+                    const hasCol = (n: any): boolean => {
+                      if (!n || typeof n !== 'object') return false;
+                      if (n.ColumnRef) return true;
+                      return Object.keys(n).some(k => hasCol(n[k]));
+                    };
+                    const hasC = (n: any): boolean => {
+                      if (!n || typeof n !== 'object') return false;
+                      if (n.A_Const) return true;
+                      return Object.keys(n).some(k => hasC(n[k]));
+                    };
+                    if ((hasCol(sub.A_Expr.lexpr) && hasC(sub.A_Expr.rexpr)) ||
+                        (hasCol(sub.A_Expr.rexpr) && hasC(sub.A_Expr.lexpr))) {
+                      subComp = true;
+                    }
+                  }
+                  if (sub.A_Const?.boolval?.boolval === true && !subComp) argIsTrue = true;
+                  for (const k of Object.keys(sub)) checkArg(sub[k], subComp);
                 };
-                checkArg(arg);
+                checkArg(arg, currentInColComp);
                 if (argIsTrue) isUnsafe = true;
               }
             }
 
-            // Check for binary expressions (A_Expr) such as =
-            if (node.A_Expr) {
-              const name = node.A_Expr.name;
-              if (Array.isArray(name)) {
-                const op = name.map((n: any) => n.String?.sval).join('.');
-                if (op === '=') {
-                  const l = JSON.stringify(node.A_Expr.lexpr);
-                  const r = JSON.stringify(node.A_Expr.rexpr);
-                  if (l === r && l.includes('A_Const')) {
-                    isUnsafe = true;
-                  }
-                }
-              }
-            }
-
             for (const key of Object.keys(node)) {
-              walkAst(node[key]);
+              walkAst(node[key], currentInColComp);
             }
           };
 
@@ -665,6 +697,30 @@ async function runPhase01Verification() {
   `;
   const rlsPos2 = await validateTableRlsPolicies('member_invitations', posAdminSql, rlsContracts.member_invitations);
 
+  // Positive Fixture 3: Legitimate predicate containing boolean literal comparison (column = TRUE)
+  const posBooleanLiteralSql = `
+    CREATE POLICY "announcements_read_active" ON public.announcements
+      FOR SELECT TO authenticated
+      USING (public.is_active_member() AND is_active = TRUE);
+    CREATE POLICY "announcements_write_officers" ON public.announcements
+      FOR INSERT TO authenticated
+      WITH CHECK (public.is_active_member() AND (public.get_caller_auth()).user_role IN ('admin', 'super_admin'));
+  `;
+  const rlsPos3 = await validateTableRlsPolicies('announcements', posBooleanLiteralSql, [
+    {
+      name: 'announcements_read_active',
+      command: 'SELECT',
+      roles: ['authenticated'],
+      usingPattern: /public\.is_active_member\(\)/
+    },
+    {
+      name: 'announcements_write_officers',
+      command: 'INSERT',
+      roles: ['authenticated'],
+      withCheckPattern: /public\.is_active_member\(\)/
+    }
+  ]);
+
   if (rlsNeg1.valid || !rlsNeg1.error?.includes('Missing expected policy')) throw new Error(`Negative Fixture 1 failed: ${JSON.stringify(rlsNeg1)}`);
   if (rlsNeg2.valid || !rlsNeg2.error?.includes('roles mismatch')) throw new Error(`Negative Fixture 2 failed: ${JSON.stringify(rlsNeg2)}`);
   if (rlsNeg3.valid || !rlsNeg3.error?.includes('command mismatch')) throw new Error(`Negative Fixture 3 failed: ${JSON.stringify(rlsNeg3)}`);
@@ -676,6 +732,7 @@ async function runPhase01Verification() {
   if (rlsNeg9.valid || !rlsNeg9.error?.includes('AST Boolean tautology')) throw new Error(`Negative Fixture 9 failed: ${JSON.stringify(rlsNeg9)}`);
   if (!rlsPos1.valid) throw new Error(`Positive Fixture 1 failed: ${rlsPos1.error}`);
   if (!rlsPos2.valid) throw new Error(`Positive Fixture 2 failed: ${rlsPos2.error}`);
+  if (!rlsPos3.valid) throw new Error(`Positive Fixture 3 failed: ${rlsPos3.error}`);
 
   rlsNegativeFixturesPassed = true;
 
